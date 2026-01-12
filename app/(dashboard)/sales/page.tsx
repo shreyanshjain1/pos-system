@@ -25,82 +25,12 @@ export default function SalesPage() {
 
   useEffect(() => { fetchPage(page) }, [page])
 
+  // Realtime for sales intentionally disabled — products are realtime-only.
+  // Keep a lightweight effect so `page` dependency remains available for future logic.
   useEffect(() => {
-    setRealtimeStatus('connecting')
-    let fallbackSubs: any[] = []
-
-    const handleChange = (payload: any) => {
-      console.debug('sales realtime payload:', payload)
-      setLastRealtimeAt(Date.now())
-      setRealtimeStatus('connected')
-      try { fetchPage(page) } catch (e) { console.warn('fetchPage after realtime failed', e) }
-    }
-
-    const channel = (supabase as any).channel ? (supabase as any).channel('public:sales') : null
-    if (channel && typeof (channel as any).on === 'function') {
-      channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sales' }, handleChange)
-      channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sales' }, handleChange)
-      ;(async () => {
-        try {
-          const res = await channel.subscribe()
-          console.debug('sales realtime subscribe', res)
-          if ((res as any)?.error) setRealtimeStatus('error')
-          else setRealtimeStatus('connected')
-        } catch (err) {
-          console.error('sales realtime subscribe error', err)
-          setRealtimeStatus('error')
-        }
-      })()
-    } else {
-      try {
-        const iSub = (supabase as any).from('sales').on('INSERT', handleChange).subscribe()
-        const uSub = (supabase as any).from('sales').on('UPDATE', handleChange).subscribe()
-        fallbackSubs = [iSub, uSub]
-        setRealtimeStatus('connected')
-      } catch (err) {
-        console.error('sales fallback subscribe error', err)
-        setRealtimeStatus('error')
-      }
-    }
-
-    inspectTimerRef.current = window.setInterval(() => {
-      try { console.debug('sales realtime debug', { channel: channel, status: realtimeStatus, lastRealtimeAt }) } catch (_) {}
-    }, 3000)
-
-    const watchdog = window.setInterval(() => {
-      const now = Date.now()
-      const last = lastRealtimeAt || 0
-      if (realtimeStatus !== 'polling' && now - last > 20000) {
-        console.warn('No sales realtime events; starting polling')
-        setRealtimeStatus('polling')
-        pollTimerRef.current = window.setInterval(() => {
-          console.debug('Polling sales due to missing realtime events')
-          fetchPage(page)
-        }, 5000)
-      }
-    }, 5000)
-
     return () => {
-      ;(async () => {
-        try {
-          if (channel && typeof (channel as any).unsubscribe === 'function') {
-            await channel.unsubscribe()
-          } else if (fallbackSubs.length) {
-            for (const s of fallbackSubs) {
-              if (!s) continue
-              if (typeof s.unsubscribe === 'function') {
-                await s.unsubscribe()
-              } else if (typeof (supabase as any).removeSubscription === 'function') {
-                ;(supabase as any).removeSubscription(s)
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('sales unsubscribe failed', e)
-        }
-        try { if (inspectTimerRef.current) window.clearInterval(inspectTimerRef.current) } catch (_) {}
-        try { if (pollTimerRef.current) window.clearInterval(pollTimerRef.current) } catch (_) {}
-      })()
+      try { if (pollTimerRef.current) { window.clearInterval(pollTimerRef.current); pollTimerRef.current = null } } catch(_) {}
+      try { if (inspectTimerRef.current) { window.clearInterval(inspectTimerRef.current); inspectTimerRef.current = null } } catch(_) {}
     }
   }, [page])
 
