@@ -1,26 +1,144 @@
-@import "tailwindcss";
+/* Global plain CSS for POS app (Tailwind removed) */
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root{
+	--bg: #ffffff;
+	--muted: #6b7280;
+	--card-bg: #ffffff;
+	--border: #e9eef6;
+	--brand: #0f172a;
+	--accent: #0b5cff;
+	--radius: 12px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* { box-sizing: border-box; }
+html,body,#__next{height:100%;}
+body{
+	margin:0;
+	font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial;
+	background: var(--bg);
+	color: var(--brand);
+	-webkit-font-smoothing:antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Layout */
+.app-root{display:flex;height:100vh;}
+.sidebar{width:260px;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--card-bg);transition:width .2s ease}
+.sidebar.collapsed{width:88px}
+.sidebar{width:240px}
+.sidebar .brand{display:flex;align-items:center;justify-content:space-between;padding:16px;border-bottom:1px solid var(--border)}
+.brand .logo{display:flex;align-items:center;gap:12px}
+.brand .logo .mark{width:36px;height:36px;background:var(--brand);color:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:16px}
+.sidebar .nav{flex:1;overflow:auto;padding:8px}
+.sidebar .nav ul{list-style:none;padding:0;margin:0}
+.sidebar .nav li{margin:6px 0}
+.nav-link{display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;color:var(--brand);text-decoration:none}
+.nav-link.center{justify-content:center}
+.nav-link:hover{background:#fbfbfb}
+.nav-dot{width:36px;height:36px;flex:0 0 36px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px solid #d1d5db;color:#6b7280;font-weight:600;background:transparent}
+.nav-link:hover .nav-dot{border-color:var(--brand);color:var(--brand);background:rgba(15,23,42,0.03)}
+.nav-label{font-size:14px;color:#1f2937}
+.sidebar .footer{padding:12px;border-top:1px solid var(--border)}
+
+.brand-text{font-weight:600;color:#111}
+
+/* scrollbar subtle */
+.sidebar .nav::-webkit-scrollbar{width:8px}
+.sidebar .nav::-webkit-scrollbar-thumb{background:#f0f0f0;border-radius:8px}
+
+.main-col{flex:1;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;border-bottom:1px solid var(--border);background:var(--card-bg)}
+.topbar .left{display:flex;align-items:center;gap:12px}
+.title-block h1{margin:0;font-size:16px}
+.title-block p{margin:0;font-size:13px}
+.topbar .search input{padding:8px 10px;border:1px solid var(--border);border-radius:8px;width:260px}
+.icon-btn{background:transparent;border:none;padding:8px;border-radius:8px;cursor:pointer}
+.icon-btn:hover{background:#fbfbfb}
+.avatar-inner{width:36px;height:36px;background:#f3f4f6;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#111}
+
+.main-content{padding:24px;overflow:auto;background:#fbfbfb}
+.container{max-width:1200px;margin:0 auto}
+
+/* Card */
+.card{background:var(--card-bg);border-radius:14px;padding:18px;box-shadow:0 8px 24px rgba(11,19,42,0.06);border:1px solid var(--border)}
+
+/* Button */
+.btn{display:inline-flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:var(--brand);color:#fff;border:none;cursor:pointer;font-weight:600;box-shadow:0 6px 18px rgba(11,19,42,0.08);transition:transform .12s ease,box-shadow .12s ease}
+.btn:hover{transform:translateY(-1px);box-shadow:0 10px 30px rgba(11,19,42,0.10)}
+.btn.secondary{background:#ffffff;color:var(--brand);border:1px solid var(--border);box-shadow:none}
+.btn.full{width:100%}
+
+/* Forms */
+.form-field{margin-bottom:12px}
+.form-field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.form-field input, .form-field select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border)}
+
+/* Utility */
+.muted{color:var(--muted)}
+.skeleton{background:#eee;border-radius:8px;min-height:12px}
+
+/* POS grid/card styles */
+.pos-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.pos-card{border:1px solid var(--border);padding:14px;border-radius:10px;background:var(--card-bg);cursor:pointer;display:flex;flex-direction:column;transition:transform .12s ease,box-shadow .12s ease}
+.pos-card:hover{box-shadow:0 10px 30px rgba(11,19,42,0.06);transform:translateY(-4px)}
+.pos-card .price{margin-top:6px;font-weight:600}
+.pos-card .stock{margin-top:8px;color:var(--muted)}
+
+.pos-card.disabled{opacity:0.6;cursor:not-allowed}
+
+/* small icon button for cart actions */
+.icon-small{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:15px;transition:background .12s ease,transform .08s ease}
+.icon-small:hover{background:#f6f8fb;transform:translateY(-1px)}
+
+.qty-controls{display:flex;align-items:center;gap:8px}
+.qty-controls .qty-btn{width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:#f7f9fc;cursor:pointer;font-size:16px;display:inline-flex;align-items:center;justify-content:center;transition:background .12s ease}
+.qty-controls .qty-btn:hover{background:#eef4ff}
+.qty-controls input{width:56px;padding:8px;border-radius:8px;border:1px solid var(--border);text-align:center;font-weight:600}
+
+/* Cart item row */
+.cart-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:10px;background:linear-gradient(180deg,#fff,#fbfeff);box-shadow:0 4px 14px rgba(11,19,42,0.04);margin-bottom:10px}
+.cart-item:last-child{margin-bottom:0}
+.cart-item .meta{flex:1}
+.cart-item .meta .title{font-weight:700;margin-bottom:6px}
+.cart-item .meta .subtitle{color:var(--muted);font-size:13px}
+
+.cart-footer{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);display:flex;justify-content:space-between;align-items:center}
+
+/* Remove native number input arrows (spinners) */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+input[type=number] {
+	appearance: textfield;
+	-moz-appearance: textfield; /* Firefox */
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Ensure small number inputs don't show overflow and have consistent padding */
+.qty-controls input[type=number] { appearance: auto; }
+
+@media (max-width:1100px){
+	.pos-grid{grid-template-columns:repeat(3,1fr)}
 }
+@media (max-width:820px){
+	.pos-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:480px){
+	.pos-grid{grid-template-columns:repeat(1,1fr)}
+}
+
+@media (max-width:768px){
+	.sidebar{position:fixed;left:0;top:0;bottom:0;z-index:40}
+	.main-content{padding:12px}
+	.topbar .search input{width:160px}
+}
+
+@media (max-width:600px){
+  .title-block{display:none}
+}
+
+/* small helpers */
+.toggle-btn{background:transparent;border:none;padding:6px;border-radius:8px;cursor:pointer}
+.toggle-btn svg{opacity:0.9}
+.sidebar{background: #fff}
+.nav-link .nav-label{white-space:nowrap}

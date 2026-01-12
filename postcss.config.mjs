@@ -1,6 +1,7 @@
 const config = {
   plugins: {
-    "@tailwindcss/postcss": {},
+    // Removed Tailwind plugin to avoid requiring '@tailwindcss/postcss' during build
+    autoprefixer: {},
   },
 };
 
