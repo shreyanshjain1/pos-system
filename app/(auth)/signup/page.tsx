@@ -4,7 +4,6 @@ import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 export default function SignupPage() {
-	const [storeName, setStoreName] = useState('')
 	const [email, setEmail] = useState('')
 	const [password, setPassword] = useState('')
 	const [confirmPassword, setConfirmPassword] = useState('')
@@ -17,10 +16,7 @@ export default function SignupPage() {
 		e?.preventDefault()
 		setError(null)
 		setMessage(null)
-		if (!storeName || storeName.trim() === '') {
-			setError('Store name is required')
-			return
-		}
+		// no store name required; onboarding will create a default shop
 		if (password !== confirmPassword) {
 			setError('Passwords do not match')
 			return
@@ -54,7 +50,7 @@ export default function SignupPage() {
 					const resp = await fetch('/api/onboard', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-						body: JSON.stringify({ user_id: userId, shop_name: storeName.trim() })
+						body: JSON.stringify({ user_id: userId })
 					})
 					const payload = await resp.json()
 					if (!resp.ok) throw new Error(payload?.error || 'Onboarding failed')
@@ -80,14 +76,6 @@ export default function SignupPage() {
 				<div style={{ textAlign: 'center', marginBottom: 8 }}>
 					<h2 style={{ margin: 0 }}>Create account</h2>
 				</div>
-
-				<div className="flex-column">
-					<label>Store name</label>
-				</div>
-				<div className="inputForm">
-					<input value={storeName} onChange={e => setStoreName(e.target.value)} placeholder="Store name" className="input" />
-				</div>
-
 				<div className="flex-column">
 					<label>Email</label>
 				</div>
