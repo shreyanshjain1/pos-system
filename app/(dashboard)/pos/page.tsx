@@ -25,6 +25,7 @@ export default function POSPage() {
   const [scanMessage, setScanMessage] = useState<string | null>(null)
   const [scannerDeviceId, setScannerDeviceId] = useState<string | null>(null)
   const [scannerMode, setScannerMode] = useState<'camera' | 'keyboard'>('keyboard')
+  const [realtimeMessage, setRealtimeMessage] = useState<string | null>(null)
 
   useEffect(() => {
     // initial load
@@ -40,18 +41,91 @@ export default function POSPage() {
       }
     } catch (_) {}
 
-    // realtime subscription for product changes
-    const channel = supabase
-      .channel('public:products')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        fetchProducts()
-      })
-      .subscribe()
+    // realtime subscription for product changes — listen to INSERT/UPDATE/DELETE
+    const channel = supabase.channel ? supabase.channel('public:products') : null
+
+    const handleChange = (payload: any) => {
+      // Supabase payloads commonly include { schema, table, type, record, old_record }
+      console.debug('realtime payload:', payload)
+      const ev = payload?.type || payload?.eventType || payload?.event || 'change'
+      // show a short on-screen indicator so developers can see updates arrive
+      try {
+        setRealtimeMessage(`${ev} on products`)
+        setTimeout(() => setRealtimeMessage(null), 1600)
+      } catch (_) {}
+
+      // Refresh product list to reflect server-side changes
+      try { fetchProducts() } catch (err) { console.warn('fetchProducts after realtime failed', err) }
+    }
+
+    // If the new channel API is available and provides `on`, use it.
+    // Otherwise fall back to the `from(...).on(...).subscribe()` compatibility path.
+    let fallbackSubs: any[] = []
+    if (channel && typeof (channel as any).on === 'function') {
+      channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'products' }, handleChange)
+      channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, handleChange)
+      channel.on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'products' }, handleChange)
+
+      ;(async () => {
+        try {
+          console.debug('Attempting to subscribe to realtime channel: public:products')
+          const res = await channel.subscribe()
+          console.debug('Realtime subscribe result:', res)
+          if ((res as any)?.error) console.error('Realtime subscription error:', (res as any).error)
+        } catch (err) {
+          console.error('Realtime subscribe() thrown error', err)
+        }
+      })()
+    } else {
+      // fallback: older/newer client compatibility using from().on().subscribe()
+      try {
+        console.debug('Realtime channel.on not available; using fallback supabase.from(...) subscriptions')
+        const iSub = supabase.from('products').on('INSERT', handleChange).subscribe()
+        const uSub = supabase.from('products').on('UPDATE', handleChange).subscribe()
+        const dSub = supabase.from('products').on('DELETE', handleChange).subscribe()
+        fallbackSubs = [iSub, uSub, dSub]
+        console.debug('Fallback subscriptions created', fallbackSubs)
+      } catch (err) {
+        console.error('Fallback realtime subscribe error', err)
+      }
+    }
+
+    // diagnostic polling for a short period to show channel object in console
+    const inspectTimer = setInterval(() => {
+      try { console.debug('realtime channel debug', channel) } catch (_) {}
+    }, 2500)
+
+    setTimeout(() => clearInterval(inspectTimer), 15000)
 
     return () => {
-      try { channel.unsubscribe() } catch (_) {}
+      ;(async () => {
+        try {
+          if (channel && typeof (channel as any).unsubscribe === 'function') {
+            const res = await channel.unsubscribe()
+            console.debug('Realtime unsubscribe result:', res)
+          } else if (fallbackSubs.length) {
+            // unsubscribe each fallback subscription (some clients return {unsubscribe: fn} or a token)
+            try {
+              for (const s of fallbackSubs) {
+                if (!s) continue
+                if (typeof s.unsubscribe === 'function') {
+                  await s.unsubscribe()
+                } else if (typeof supabase.removeSubscription === 'function') {
+                  // older supabase-js versions
+                  supabase.removeSubscription(s)
+                }
+              }
+            } catch (e) {
+              console.warn('fallback unsubscribe error', e)
+            }
+          }
+        } catch (e) {
+          console.warn('unsubscribe failed', e)
+        }
+      })()
     }
   }, [])
+
 
   async function fetchProducts() {
     setLoading(true)
