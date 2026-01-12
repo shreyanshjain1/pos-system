@@ -6,6 +6,7 @@ import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import ThermalReceipt from '@/components/print/ThermalReceipt'
 import ReceiptPreview from '@/components/print/ReceiptPreview'
+import { useRef } from 'react'
 
 type Product = { id: string; name: string; price: number; stock: number; barcode?: string }
 type CartItem = { product: Product; qty: number }
@@ -26,6 +27,14 @@ export default function POSPage() {
   const [scannerDeviceId, setScannerDeviceId] = useState<string | null>(null)
   const [scannerMode, setScannerMode] = useState<'camera' | 'keyboard'>('keyboard')
   const [realtimeMessage, setRealtimeMessage] = useState<string | null>(null)
+  const [realtimeStatus, setRealtimeStatus] = useState<'idle'|'connecting'|'connected'|'error'|'polling'>('idle')
+  const [lastRealtimeAt, setLastRealtimeAt] = useState<number | null>(null)
+  const pollTimerRef = useRef<number | null>(null)
+  const inspectTimerRef = useRef<number | null>(null)
+  const pendingRealtimeRef = useRef<any[]>([])
+  const realtimeDebounceRef = useRef<number | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+  const [showCartModal, setShowCartModal] = useState(false)
 
   useEffect(() => {
     // initial load
@@ -42,26 +51,84 @@ export default function POSPage() {
     } catch (_) {}
 
     // realtime subscription for product changes — listen to INSERT/UPDATE/DELETE
-    const channel = supabase.channel ? supabase.channel('public:products') : null
+    setRealtimeStatus('connecting')
+    const channel = (supabase as any).channel ? (supabase as any).channel('public:products') : null
 
     const handleChange = (payload: any) => {
       // Supabase payloads commonly include { schema, table, type, record, old_record }
       console.debug('realtime payload:', payload)
       const ev = payload?.type || payload?.eventType || payload?.event || 'change'
-      // show a short on-screen indicator so developers can see updates arrive
+
+      // show a short on-screen indicator
       try {
         setRealtimeMessage(`${ev} on products`)
-        setTimeout(() => setRealtimeMessage(null), 1600)
+        setTimeout(() => setRealtimeMessage(null), 1200)
       } catch (_) {}
 
-      // Refresh product list to reflect server-side changes
-      try { fetchProducts() } catch (err) { console.warn('fetchProducts after realtime failed', err) }
+      // Queue payloads and debounce processing to avoid many full fetches
+      pendingRealtimeRef.current.push(payload)
+      // If debounce already scheduled, return
+      if (realtimeDebounceRef.current) return
+
+      realtimeDebounceRef.current = window.setTimeout(() => {
+        const batch = pendingRealtimeRef.current.splice(0)
+        realtimeDebounceRef.current = null
+
+        // Try incremental update: if all events contain a record with id, apply updates locally
+        let applied = false
+        try {
+          const updatesById: Record<string, any> = {}
+          const deletes: Set<string> = new Set()
+          for (const p of batch) {
+            const t = p?.event || p?.type || p?.eventType
+            const rec = p?.record || p?.new || p?.payload || null
+            if (t === 'DELETE' || t === 'delete') {
+              const id = (p?.old_record || p?.record || p?.old || p?.payload?.old)?.id
+              if (id) deletes.add(id)
+            } else if (rec && rec.id) {
+              updatesById[rec.id] = rec
+            } else {
+              // unknown payload, fallback
+              applied = false
+              break
+            }
+            applied = true
+          }
+
+          if (applied) {
+            setProducts(prev => {
+              let next = prev.map(it => {
+                if (deletes.has(it.id)) return null as any
+                if (updatesById[it.id]) {
+                  const upd = updatesById[it.id]
+                  return { ...it, ...upd }
+                }
+                return it
+              }).filter(Boolean)
+              // include any new records that aren't present
+              for (const id of Object.keys(updatesById)) {
+                if (!next.find((x: any) => x.id === id)) next.push(updatesById[id])
+              }
+              return next
+            })
+          } else {
+            // fallback to full refetch when we can't apply incremental updates
+            fetchProducts()
+          }
+        } catch (e) {
+          console.warn('Incremental realtime apply failed, refetching', e)
+          fetchProducts()
+        }
+
+        try { setLastRealtimeAt(Date.now()); setRealtimeStatus('connected') } catch (_) {}
+      }, 400)
     }
 
     // If the new channel API is available and provides `on`, use it.
     // Otherwise fall back to the `from(...).on(...).subscribe()` compatibility path.
     let fallbackSubs: any[] = []
     if (channel && typeof (channel as any).on === 'function') {
+      setRealtimeStatus('connecting')
       channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'products' }, handleChange)
       channel.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, handleChange)
       channel.on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'products' }, handleChange)
@@ -71,31 +138,52 @@ export default function POSPage() {
           console.debug('Attempting to subscribe to realtime channel: public:products')
           const res = await channel.subscribe()
           console.debug('Realtime subscribe result:', res)
-          if ((res as any)?.error) console.error('Realtime subscription error:', (res as any).error)
+          if ((res as any)?.error) {
+            console.error('Realtime subscription error (channel):', (res as any).error)
+            setRealtimeStatus('error')
+          } else {
+            setRealtimeStatus('connected')
+          }
         } catch (err) {
           console.error('Realtime subscribe() thrown error', err)
+          setRealtimeStatus('error')
         }
       })()
     } else {
       // fallback: older/newer client compatibility using from().on().subscribe()
       try {
         console.debug('Realtime channel.on not available; using fallback supabase.from(...) subscriptions')
-        const iSub = supabase.from('products').on('INSERT', handleChange).subscribe()
-        const uSub = supabase.from('products').on('UPDATE', handleChange).subscribe()
-        const dSub = supabase.from('products').on('DELETE', handleChange).subscribe()
+        const iSub = (supabase as any).from('products').on('INSERT', handleChange).subscribe()
+        const uSub = (supabase as any).from('products').on('UPDATE', handleChange).subscribe()
+        const dSub = (supabase as any).from('products').on('DELETE', handleChange).subscribe()
         fallbackSubs = [iSub, uSub, dSub]
         console.debug('Fallback subscriptions created', fallbackSubs)
+        setRealtimeStatus('connected')
       } catch (err) {
         console.error('Fallback realtime subscribe error', err)
+        setRealtimeStatus('error')
       }
     }
 
     // diagnostic polling for a short period to show channel object in console
-    const inspectTimer = setInterval(() => {
-      try { console.debug('realtime channel debug', channel) } catch (_) {}
+    inspectTimerRef.current = window.setInterval(() => {
+      try { console.debug('realtime channel debug', channel, { status: realtimeStatus, lastRealtimeAt }) } catch (_) {}
     }, 2500)
 
-    setTimeout(() => clearInterval(inspectTimer), 15000)
+    // Start a watchdog: if no realtime payload arrives within 20s, start polling every 5s
+    const watchdog = window.setInterval(() => {
+      const now = Date.now()
+      const last = lastRealtimeAt || 0
+      if (realtimeStatus !== 'polling' && now - last > 20000) {
+        console.warn('No realtime events received recently; entering polling fallback')
+        setRealtimeStatus('polling')
+        // kick off short polling until connected
+        pollTimerRef.current = window.setInterval(() => {
+          console.debug('Polling products due to missing realtime events')
+          fetchProducts()
+        }, 5000)
+      }
+    }, 5000)
 
     return () => {
       ;(async () => {
@@ -110,20 +198,33 @@ export default function POSPage() {
                 if (!s) continue
                 if (typeof s.unsubscribe === 'function') {
                   await s.unsubscribe()
-                } else if (typeof supabase.removeSubscription === 'function') {
+                } else if (typeof (supabase as any).removeSubscription === 'function') {
                   // older supabase-js versions
-                  supabase.removeSubscription(s)
+                  ;(supabase as any).removeSubscription(s)
                 }
               }
             } catch (e) {
               console.warn('fallback unsubscribe error', e)
             }
           }
+
+          // clear inspect and poll timers
+          try { if (inspectTimerRef.current) window.clearInterval(inspectTimerRef.current) } catch (_) {}
+          try { if (pollTimerRef.current) window.clearInterval(pollTimerRef.current) } catch (_) {}
         } catch (e) {
           console.warn('unsubscribe failed', e)
         }
       })()
     }
+  }, [])
+
+  useEffect(() => {
+    function onResize() {
+      setIsMobile(window.matchMedia('(max-width:820px)').matches)
+    }
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
 
@@ -259,6 +360,13 @@ export default function POSPage() {
 
   return (
     <div>
+      {/* Realtime diagnostics */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: '#666' }}>
+          Realtime: <strong style={{ color: realtimeStatus === 'connected' ? '#059669' : realtimeStatus === 'polling' ? '#b45309' : realtimeStatus === 'error' ? '#b91c1c' : '#374151' }}>{realtimeStatus}</strong>
+          {lastRealtimeAt ? <span style={{ marginLeft: 8 }}>Last: {new Date(lastRealtimeAt).toLocaleTimeString()}</span> : null}
+        </div>
+      </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
         <div>
           <h2 style={{ margin: 0 }}>Point of Sale</h2>
@@ -269,7 +377,7 @@ export default function POSPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 360px', gap: 16 }}>
         <div>
           <Card>
             {loading ? (
@@ -298,52 +406,54 @@ export default function POSPage() {
           </Card>
         </div>
 
-        <div>
-          <Card>
-            <h3 style={{ marginTop: 0 }}>Cart</h3>
-            {cart.length === 0 ? (
-              <div className="muted">Cart is empty</div>
-            ) : (
-              <div>
-                {cart.map(i => (
-                  <div key={i.product.id} className="cart-item">
-                    <div className="meta">
-                      <div className="title">{i.product.name}</div>
-                      <div className="subtitle">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <div className="qty-controls">
-                        <button className="qty-btn" aria-label="Decrease quantity" onClick={() => changeQty(i.product.id, Math.max(1, i.qty - 1))}>−</button>
-                        <input type="number" value={i.qty} min={1} max={i.product.stock} onChange={e => changeQty(i.product.id, Math.max(1, Number(e.target.value) || 1))} />
-                        <button className="qty-btn" aria-label="Increase quantity" onClick={() => changeQty(i.product.id, Math.min(i.product.stock, i.qty + 1))}>+</button>
+        {!isMobile && (
+          <div>
+            <Card>
+              <h3 style={{ marginTop: 0 }}>Cart</h3>
+              {cart.length === 0 ? (
+                <div className="muted">Cart is empty</div>
+              ) : (
+                <div>
+                  {cart.map(i => (
+                    <div key={i.product.id} className="cart-item">
+                      <div className="meta">
+                        <div className="title">{i.product.name}</div>
+                        <div className="subtitle">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
                       </div>
 
-                      <button className="icon-small" title="Remove" onClick={() => removeItem(i.product.id)} aria-label="Remove item">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                          <path d="M10 11v6" />
-                          <path d="M14 11v6" />
-                          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                        </svg>
-                      </button>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <div className="qty-controls">
+                          <button className="qty-btn" aria-label="Decrease quantity" onClick={() => changeQty(i.product.id, Math.max(1, i.qty - 1))}>−</button>
+                          <input type="number" value={i.qty} min={1} max={i.product.stock} onChange={e => changeQty(i.product.id, Math.max(1, Number(e.target.value) || 1))} />
+                          <button className="qty-btn" aria-label="Increase quantity" onClick={() => changeQty(i.product.id, Math.min(i.product.stock, i.qty + 1))}>+</button>
+                        </div>
+
+                        <button className="icon-small" title="Remove" onClick={() => removeItem(i.product.id)} aria-label="Remove item">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6" />
+                            <path d="M14 11v6" />
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
+                  ))}
+
+                  <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontWeight: 700 }}>Total</div>
+                    <div style={{ fontWeight: 700 }}>{formatCurrency(computeTotal())}</div>
                   </div>
-                ))}
 
-                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontWeight: 700 }}>Total</div>
-                  <div style={{ fontWeight: 700 }}>{formatCurrency(computeTotal())}</div>
+                  <div style={{ marginTop: 12 }}>
+                    <Button onClick={handleCheckout} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
+                  </div>
                 </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <Button onClick={handleCheckout} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
+              )}
+            </Card>
+          </div>
+        )}
       </div>
       {receipt && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
@@ -394,6 +504,78 @@ export default function POSPage() {
             </Card>
           </div>
         </div>
+      )}
+
+      {/* Floating cart button for mobile */}
+      {isMobile && (
+        <>
+          <button
+            aria-label="Open cart"
+            className="floating-cart"
+            onClick={() => setShowCartModal(true)}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ color: '#fff' }}>
+              <path d="M6 6h15l-1.5 9h-12z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="10" cy="20" r="1" fill="currentColor" />
+              <circle cx="18" cy="20" r="1" fill="currentColor" />
+            </svg>
+            {cart.length > 0 && <span className="floating-cart-badge">{cart.length}</span>}
+          </button>
+
+          {showCartModal && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100 }}>
+              <div style={{ width: '100%', maxWidth: 520, padding: 12 }}>
+                <Card>
+                  <h3 style={{ marginTop: 0 }}>Cart</h3>
+                  {cart.length === 0 ? (
+                    <div className="muted">Cart is empty</div>
+                  ) : (
+                    <div>
+                      {cart.map(i => (
+                        <div key={i.product.id} className="cart-item">
+                          <div className="meta">
+                            <div className="title">{i.product.name}</div>
+                            <div className="subtitle">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <div className="qty-controls">
+                              <button className="qty-btn" aria-label="Decrease quantity" onClick={() => changeQty(i.product.id, Math.max(1, i.qty - 1))}>−</button>
+                              <input type="number" value={i.qty} min={1} max={i.product.stock} onChange={e => changeQty(i.product.id, Math.max(1, Number(e.target.value) || 1))} />
+                              <button className="qty-btn" aria-label="Increase quantity" onClick={() => changeQty(i.product.id, Math.min(i.product.stock, i.qty + 1))}>+</button>
+                            </div>
+
+                            <button className="icon-small" title="Remove" onClick={() => removeItem(i.product.id)} aria-label="Remove item">
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                <path d="M10 11v6" />
+                                <path d="M14 11v6" />
+                                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ fontWeight: 700 }}>Total</div>
+                        <div style={{ fontWeight: 700 }}>{formatCurrency(computeTotal())}</div>
+                      </div>
+
+                      <div style={{ marginTop: 12 }}>
+                        <Button onClick={() => { setShowPaymentModal(true); setShowCartModal(false) }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+                <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button onClick={() => setShowCartModal(false)}>Close</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Scanner modal */}

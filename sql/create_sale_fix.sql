@@ -21,6 +21,8 @@ DECLARE
   v_product_id uuid;
   v_qty int;
   v_price numeric;
+  v_stock int;
+  v_product_name text;
 BEGIN
   -- Basic validation
   IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' THEN
@@ -32,21 +34,39 @@ BEGIN
   VALUES (p_total, p_payment_method, now(), p_user_id, p_shop_id)
   RETURNING id INTO v_sale_id;
 
-  -- Create sale items and update product stock
+  -- For each item: lock the product row, validate stock, insert sale_item, and decrement stock.
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
     v_product_id := (v_item->>'product_id')::uuid;
     v_qty := COALESCE((v_item->>'quantity')::int, 0);
     v_price := COALESCE((v_item->>'price')::numeric, 0);
 
+    -- Lock product row to prevent concurrent modifications
+    SELECT p.stock, p.name INTO v_stock, v_product_name
+    FROM public.products p
+    WHERE p.id = v_product_id
+    FOR UPDATE;
+
+    IF v_stock IS NULL THEN
+      RAISE EXCEPTION 'Product not found: %', v_product_id;
+    END IF;
+
+    IF v_qty < 0 THEN
+      RAISE EXCEPTION 'Invalid quantity for product %: %', v_product_id, v_qty;
+    END IF;
+
+    IF v_stock < v_qty THEN
+      RAISE EXCEPTION 'Insufficient stock for product % (% available, % requested)', v_product_id, v_stock, v_qty;
+    END IF;
+
     -- Insert sale item with explicit column names, include shop_id for explicit tenant linkage
     INSERT INTO public.sale_items (sale_id, product_id, quantity, price, shop_id)
     VALUES (v_sale_id, v_product_id, v_qty, v_price, p_shop_id);
 
-    -- Decrement product stock using fully-qualified references
+    -- Decrement product stock
     UPDATE public.products
-    SET stock = public.products.stock - v_qty
-    WHERE public.products.id = v_product_id;
+    SET stock = v_stock - v_qty
+    WHERE id = v_product_id;
   END LOOP;
 
   -- Return sale + items as JSON, include product names by joining products
@@ -73,6 +93,6 @@ END;
 $$;
 
 -- Notes:
--- 1) This function uses fully-qualified table/column references to avoid ambiguous column errors.
--- 2) If you need stock validation (prevent negative stock), add checks before the UPDATE or raise.
--- 3) Ensure your RLS/policies allow the server key to execute this (use service_role for server RPCs).
+-- 1) This function locks product rows with `FOR UPDATE` to prevent concurrent stock races.
+-- 2) It validates stock and raises a clear exception if stock is insufficient.
+-- 3) Use the service-role key or a server-side Supabase admin client to call this RPC when RLS is enabled.

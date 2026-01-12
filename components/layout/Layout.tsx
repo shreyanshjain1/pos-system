@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
+import { SidebarProvider } from './SidebarContext'
 import { supabase } from '@/lib/supabase/client'
 import { ShopProvider } from '@/components/context/ShopContext'
 
@@ -30,15 +31,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-root">
-      <ShopProvider>
-        {authed && <Sidebar />}
-        <div className="main-col">
-          {authed && <Topbar />}
-          <main className="main-content">
-            <div className="container">{children}</div>
-          </main>
-        </div>
-      </ShopProvider>
+      <SidebarProvider>
+        <ShopProvider>
+          {authed && <Sidebar />}
+          <div className="main-col">
+            {authed && <Topbar />}
+            <main className="main-content">
+              <div className="container">{children}</div>
+            </main>
+          </div>
+        </ShopProvider>
+      </SidebarProvider>
     </div>
   )
 }

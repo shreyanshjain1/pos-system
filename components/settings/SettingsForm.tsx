@@ -12,6 +12,13 @@ type Settings = {
   preferredPrinter?: string
   scannerDeviceId?: string
   scannerMode?: 'keyboard'
+  // BIR optional settings
+  birEnabled?: boolean
+  birTin?: string
+  birBusinessAddress?: string
+  birPermit?: string
+  birPricesIncludeVat?: boolean
+  birVatRate?: number
 }
 
 const STORAGE_KEY = 'pos:settings'
@@ -26,6 +33,12 @@ const DEFAULTS: Settings = {
   preferredPrinter: '',
   scannerDeviceId: '',
   scannerMode: 'keyboard',
+  birEnabled: false,
+  birTin: '',
+  birBusinessAddress: '',
+  birPermit: '',
+  birPricesIncludeVat: true,
+  birVatRate: 12,
 }
 
 export default function SettingsForm() {
@@ -173,6 +186,44 @@ export default function SettingsForm() {
         <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>Barcode scanner</div>
         <div style={{ fontSize: 13, color: '#444' }}>This app uses hardware barcode scanners (USB keyboard-emulating). When scanning, the scanner will type the barcode into the focused input. Camera-based scanning is disabled.</div>
       </label>
+
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox" checked={!!settings.birEnabled} onChange={e => update('birEnabled', e.target.checked)} />
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Enable BIR / Official Receipt format (optional)</div>
+        </label>
+
+        {settings.birEnabled && (
+          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+            <label>
+              <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>Business TIN</div>
+              <input value={settings.birTin || ''} onChange={e => update('birTin', e.target.value)} placeholder="123-456-789-000" style={{ width: '100%', padding: '8px 10px' }} />
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>Business Address</div>
+              <input value={settings.birBusinessAddress || ''} onChange={e => update('birBusinessAddress', e.target.value)} placeholder="Street, City, Postal" style={{ width: '100%', padding: '8px 10px' }} />
+            </label>
+
+            <label>
+              <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>Permit / Accreditation (optional)</div>
+              <input value={settings.birPermit || ''} onChange={e => update('birPermit', e.target.value)} placeholder="Permit no / Accreditation" style={{ width: '100%', padding: '8px 10px' }} />
+            </label>
+
+            <label style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={!!settings.birPricesIncludeVat} onChange={e => update('birPricesIncludeVat', e.target.checked)} />
+                <div style={{ fontSize: 13 }}>Prices include VAT</div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>VAT rate (%)</div>
+                <input type="number" value={settings.birVatRate as number || 12} onChange={e => update('birVatRate', Number(e.target.value || 12))} style={{ width: 100, padding: '8px 10px' }} />
+              </div>
+            </label>
+          </div>
+        )}
+      </div>
 
       <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
         <button type="submit" style={{ padding: '8px 12px' }}>

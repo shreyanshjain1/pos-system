@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase/client'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 import { useShop } from '@/components/context/ShopContext'
 import { usePathname } from 'next/navigation'
+import { useSidebar } from './SidebarContext'
 
 function humanizeSegment(seg: string) {
   if (!seg) return ''
@@ -24,9 +25,7 @@ export default function Topbar() {
   return (
     <header className="topbar">
       <div className="left">
-        <button className="icon-btn" aria-label="Toggle menu">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </button>
+        <MobileToggle />
         <div className="title-block">
           <h1>{title}</h1>
         </div>
@@ -36,6 +35,15 @@ export default function Topbar() {
         <ProfileMenu />
       </div>
     </header>
+  )
+}
+
+function MobileToggle() {
+  const { toggleMobile, mobileOpen } = useSidebar()
+  return (
+    <button className="icon-btn" aria-label="Toggle menu" aria-expanded={mobileOpen} onClick={() => toggleMobile()}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    </button>
   )
 }
 

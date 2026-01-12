@@ -38,9 +38,16 @@ function loadSettings() {
       currency: parsed.currency || 'PHP',
       autoClosePrint: parsed.autoClosePrint !== false,
       paperSize: parsed.paperSize || '80',
+      // BIR-related settings
+      birEnabled: parsed.birEnabled || false,
+      birTin: parsed.birTin || '',
+      birBusinessAddress: parsed.birBusinessAddress || '',
+      birPermit: parsed.birPermit || '',
+      birPricesIncludeVat: parsed.birPricesIncludeVat !== false,
+      birVatRate: parsed.birVatRate || 12,
     }
   } catch (e) {
-    return { storeName: '', receiptHeader: '', receiptFooter: '', currency: 'PHP', autoClosePrint: true, paperSize: '80' }
+    return { storeName: '', receiptHeader: '', receiptFooter: '', currency: 'PHP', autoClosePrint: true, paperSize: '80', birEnabled: false, birTin: '', birBusinessAddress: '', birPermit: '', birPricesIncludeVat: true, birVatRate: 12 }
   }
 }
 
@@ -69,12 +76,65 @@ export default function ThermalReceipt({ sale }: { sale: Sale }) {
     const created = sale.created_at ? new Date(sale.created_at).toLocaleString() : new Date().toLocaleString()
     const currency = settings.currency || 'PHP'
 
+    const saleIdShort = sale.id ? String(sale.id).slice(0, 12) : ''
+
+    // Build items HTML
     const itemsHtml = sale.items.map(it => {
       const lineTotal = it.qty * it.price
-      return `<div class="item"><div class="name">${escapeHtml(it.name)}</div><div class="price">${escapeHtml(it.qty + ' × ' + formatCurrency(it.price, currency))}</div></div>`
+      return `<div class="item"><div class="name">${escapeHtml(it.name)} ${escapeHtml('(' + it.qty + '×)')}</div><div class="price">${escapeHtml(formatCurrency(lineTotal, currency))}</div></div>`
     }).join('\n')
 
-    const saleIdShort = sale.id ? String(sale.id).slice(0, 12) : ''
+    // If BIR mode enabled, show BIR-style receipt with VAT breakdown
+    if (settings.birEnabled) {
+      const vatRate = Number(settings.birVatRate) || 12
+      const pricesIncludeVat = !!settings.birPricesIncludeVat
+      const total = Number(sale.total || 0)
+      let vatAmount = 0
+      let vatBase = total
+      if (pricesIncludeVat) {
+        vatAmount = +(total * (vatRate / (100 + vatRate)))
+        vatBase = +(total - vatAmount)
+      } else {
+        vatAmount = +(total * (vatRate / 100))
+        vatBase = total
+      }
+
+      return `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width,initial-scale=1" />
+          <title>Official Receipt</title>
+          <style>${css}</style>
+        </head>
+        <body>
+          <div class="receipt">
+            <div class="center bold" style="font-size:14px">OFFICIAL RECEIPT</div>
+            <div class="center bold" style="font-size:13px">${escapeHtml(header)}</div>
+            ${settings.birTin ? `<div class="center small">TIN: ${escapeHtml(settings.birTin)}</div>` : ''}
+            ${settings.birBusinessAddress ? `<div class="center small">${escapeHtml(settings.birBusinessAddress)}</div>` : ''}
+            ${settings.birPermit ? `<div class="center small">Permit: ${escapeHtml(settings.birPermit)}</div>` : ''}
+            <div class="hr"></div>
+            <div class="small">Date: ${escapeHtml(created)}</div>
+            ${saleIdShort ? `<div class="small">OR #: ${escapeHtml(saleIdShort)}</div>` : ''}
+            <div class="hr"></div>
+            ${itemsHtml}
+            <div class="hr"></div>
+            <div style="display:flex;justify-content:space-between;font-weight:700;font-size:11px"><div>VATable Sales</div><div>${escapeHtml(formatCurrency(vatBase, currency))}</div></div>
+            <div style="display:flex;justify-content:space-between;font-weight:700;font-size:11px"><div>VAT ${vatRate}%</div><div>${escapeHtml(formatCurrency(vatAmount, currency))}</div></div>
+            <div style="display:flex;justify-content:space-between;font-weight:800;font-size:12px;margin-top:4px"><div>Total</div><div>${escapeHtml(formatCurrency(total, currency))}</div></div>
+            ${sale.payment !== undefined ? `<div style="display:flex;justify-content:space-between;font-size:11px"><div>Payment</div><div>${escapeHtml(formatCurrency(sale.payment, currency))}</div></div>` : ''}
+            ${sale.change !== undefined ? `<div style="display:flex;justify-content:space-between;font-size:11px"><div>Change</div><div>${escapeHtml(formatCurrency(sale.change, currency))}</div></div>` : ''}
+            <div class="hr"></div>
+            <div class="center small">This serves as an official receipt for the transaction.</div>
+            ${settings.receiptFooter ? `<div class="center small">${escapeHtml(settings.receiptFooter)}</div>` : ''}
+          </div>
+        </body>
+      </html>
+      `
+    }
+
+    // Default (non-BIR) receipt
     return `
       <html>
         <head>

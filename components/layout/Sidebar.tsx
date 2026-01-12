@@ -1,6 +1,7 @@
 "use client"
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
+import { useSidebar } from './SidebarContext'
 
 type NavItem = { href: string; label: string; icon?: React.ReactNode }
 
@@ -51,6 +52,7 @@ const NAV: NavItem[] = [
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [hovered, setHovered] = useState('')
+  const { mobileOpen, setMobileOpen } = useSidebar()
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar-collapsed')
@@ -62,11 +64,18 @@ export default function Sidebar() {
   }, [collapsed])
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="brand">
-        <div onClick={() => setCollapsed(v => !v)} className="logo">
-          <div className="mark">R</div>
-          {!collapsed && <span className="brand-text" >RNL POS</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'space-between' }}>
+          <div onClick={() => setCollapsed(v => !v)} className="logo" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="mark">R</div>
+            {!collapsed && <span className="brand-text" >RNL POS</span>}
+          </div>
+          {mobileOpen && (
+            <button className="icon-btn" aria-label="Close menu" onClick={() => setMobileOpen(false)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          )}
         </div>
       </div>
 
