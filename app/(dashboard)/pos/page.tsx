@@ -121,7 +121,7 @@ export default function POSPage() {
         }
 
         try { setLastRealtimeAt(Date.now()); setRealtimeStatus('connected') } catch (_) {}
-      }, 400)
+      }, 800)
     }
 
     // If the new channel API is available and provides `on`, use it.
@@ -165,23 +165,28 @@ export default function POSPage() {
       }
     }
 
-    // diagnostic polling for a short period to show channel object in console
-    inspectTimerRef.current = window.setInterval(() => {
-      try { console.debug('realtime channel debug', channel, { status: realtimeStatus, lastRealtimeAt }) } catch (_) {}
-    }, 2500)
+    // diagnostic polling: only log occasionally to avoid noisy console and rerenders
+    if (process.env.NODE_ENV !== 'production') {
+      inspectTimerRef.current = window.setInterval(() => {
+        try { console.debug('realtime channel debug', channel, { status: realtimeStatus, lastRealtimeAt }) } catch (_) {}
+      }, 15000)
+    }
 
-    // Start a watchdog: if no realtime payload arrives within 20s, start polling every 5s
+    // Start a watchdog: if no realtime payload arrives within 30s, start polling every 15s
     const watchdog = window.setInterval(() => {
       const now = Date.now()
       const last = lastRealtimeAt || 0
-      if (realtimeStatus !== 'polling' && now - last > 20000) {
+      if (realtimeStatus !== 'polling' && now - last > 30000) {
         console.warn('No realtime events received recently; entering polling fallback')
         setRealtimeStatus('polling')
-        // kick off short polling until connected
+        // kick off longer polling until connected
+        if (pollTimerRef.current) {
+          try { window.clearInterval(pollTimerRef.current) } catch (_) {}
+        }
         pollTimerRef.current = window.setInterval(() => {
           console.debug('Polling products due to missing realtime events')
-          fetchProducts()
-        }, 5000)
+          fetchProducts({ skipLoading: true })
+        }, 15000)
       }
     }, 5000)
 
@@ -228,8 +233,9 @@ export default function POSPage() {
   }, [])
 
 
-  async function fetchProducts() {
-    setLoading(true)
+  async function fetchProducts(opts?: { skipLoading?: boolean }) {
+    const skipLoading = opts?.skipLoading === true
+    if (!skipLoading) setLoading(true)
     try {
       // Attach current user's access token so server can scope by shop
       const { data } = await supabase.auth.getSession()
@@ -241,9 +247,9 @@ export default function POSPage() {
       if (!res.ok) throw new Error(json?.error || 'Failed to load')
       setProducts(json.data || [])
     } catch (err: any) {
-      setError(err?.message || 'Failed to load')
+      if (!skipLoading) setError(err?.message || 'Failed to load')
     } finally {
-      setLoading(false)
+      if (!skipLoading) setLoading(false)
     }
   }
 
