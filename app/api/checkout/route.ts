@@ -29,6 +29,18 @@ export async function POST(req: Request) {
     // Require a shop mapping for checkout
     if (!shopId) return NextResponse.json({ error: 'No shop mapping' }, { status: 403 })
 
+    // Subscription check: require active subscription for user
+    try {
+      const { getSubscriptionStatus } = await import('@/lib/subscription')
+      if (userId) {
+        const status = await getSubscriptionStatus(supabase, userId)
+        if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+      }
+    } catch (e) {
+      console.warn('Checkout: subscription check error', e)
+      return NextResponse.json({ error: 'Subscription check error' }, { status: 500 })
+    }
+
     // send items as a JSON array (not a string) so the RPC receives a proper JSON/JSONB array
     const rpcPayload: any = {
       p_total: total,

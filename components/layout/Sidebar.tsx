@@ -52,11 +52,27 @@ const NAV: NavItem[] = [
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [hovered, setHovered] = useState('')
+  const [userEmail, setUserEmail] = useState<string | null>(null)
   const { mobileOpen, setMobileOpen } = useSidebar()
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar-collapsed')
     setCollapsed(saved === '1')
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const { data } = await import('@/lib/supabase/client').then(m => m.supabase.auth.getSession())
+        const session = (data as any)?.session
+        if (!mounted) return
+        setUserEmail(session?.user?.email ?? null)
+      } catch (e) {
+        // ignore
+      }
+    })()
+    return () => { mounted = false }
   }, [])
 
   useEffect(() => {
@@ -120,6 +136,22 @@ export default function Sidebar() {
               </Link>
             </li>
           ))}
+
+          {/* Admin link - visible only to owner email */}
+          {userEmail === 'raymart.leyson.rl@gmail.com' && (
+            <li>
+              <Link href="/admin" className={`nav-link ${collapsed ? 'center' : ''}`} aria-label="Admin" title="Admin" onMouseEnter={() => setHovered('/admin')} onMouseLeave={() => setHovered('')} style={{ position: 'relative' }}>
+                {ICON(
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false">
+                    <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" />
+                  </svg>
+                )}
+                {!collapsed ? <span className="nav-label">Admin</span> : (hovered === '/admin' && (
+                  <span className="nav-tooltip" style={{ position: 'absolute', left: 'calc(100% + 8px)', top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '6px 8px', borderRadius: 6, whiteSpace: 'nowrap', fontSize: 13, zIndex: 40 }}>Admin</span>
+                ))}
+              </Link>
+            </li>
+          )}
         </ul>
       </nav>
 

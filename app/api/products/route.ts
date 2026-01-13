@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getSubscriptionStatus } from '@/lib/subscription'
 
 export async function GET(req: Request) {
   // Fetch products
@@ -23,6 +24,25 @@ export async function GET(req: Request) {
     // Enforce that caller must have at least one mapped shop; do not return global products
     if (shopIds.length === 0) {
       return NextResponse.json({ error: 'No shop mapping' }, { status: 403 })
+    }
+
+    // Subscription check: require active subscription for the authenticated user
+    try {
+      // if there's an authenticated user, validate their subscription
+      const authHeader2 = req.headers.get('authorization') || ''
+      if (authHeader2.startsWith('Bearer ')) {
+        const token = authHeader2.split(' ')[1]
+        const { data: authData } = await (supabaseAdmin.auth as any).getUser(token)
+        const userId = (authData as any)?.user?.id
+        if (userId) {
+          const status = await getSubscriptionStatus(supabaseAdmin, userId)
+          if (!status.active) {
+            return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Products: subscription check error', e)
     }
 
     let query = supabaseAdmin.from('products').select('id, name, price, stock, barcode, created_at').order('created_at', { ascending: false })

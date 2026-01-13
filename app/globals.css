@@ -183,3 +183,15 @@ input[type=number] {
 .toggle-btn svg{opacity:0.9}
 .sidebar{background: #fff}
 .nav-link .nav-label{white-space:nowrap}
+
+/* Admin users table / badges */
+.users-table{width:100%;border-collapse:collapse;font-size:14px}
+.users-table th,.users-table td{padding:12px 10px;border-bottom:1px solid rgba(0,0,0,0.04);text-align:left}
+.users-table thead th{font-size:13px;color:var(--muted);font-weight:600}
+.users-table tbody tr:hover{background:linear-gradient(180deg,#ffffff,#fbfbff)}
+.user-email{font-weight:600;color:var(--brand)}
+.user-created{color:var(--muted);font-size:13px}
+.badge{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:700;font-size:12px}
+.badge.active{background:rgba(11,92,255,0.08);color:var(--accent)}
+.badge.expired{background:rgba(239,68,68,0.06);color:#ef4444}
+.badge.locked{background:rgba(107,114,128,0.06);color:var(--muted)}

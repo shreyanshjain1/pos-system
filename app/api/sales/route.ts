@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getSubscriptionStatus } from '@/lib/subscription'
 
 export async function GET(req: Request) {
   try {
@@ -43,6 +44,22 @@ export async function GET(req: Request) {
     } else {
       // Do not return global or shared sales. Require a shop mapping.
       return NextResponse.json({ error: 'No shop mapping' }, { status: 403 })
+    }
+
+    // Check subscription for the caller (require active subscription)
+    try {
+      const authHeader2 = req.headers.get('authorization') || ''
+      if (authHeader2.startsWith('Bearer ')) {
+        const token = authHeader2.split(' ')[1]
+        const { data: authData } = await (supabase.auth as any).getUser(token)
+        const userId = (authData as any)?.user?.id
+        if (userId) {
+          const status = await getSubscriptionStatus(supabase, userId)
+          if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+        }
+      }
+    } catch (e) {
+      console.warn('Sales: subscription check error', e)
     }
 
     const { data, error, count } = await query
