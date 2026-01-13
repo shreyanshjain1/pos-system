@@ -16,7 +16,6 @@ export default function SignupPage() {
 		e?.preventDefault()
 		setError(null)
 		setMessage(null)
-		// no store name required; onboarding will create a default shop
 		if (password !== confirmPassword) {
 			setError('Passwords do not match')
 			return
