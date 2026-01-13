@@ -27,7 +27,8 @@ const DEFAULTS: Settings = {
   storeName: '',
   currency: 'PHP',
   receiptHeader: '',
-  receiptFooter: '',
+  // static footer that promotes RNL STUDIO
+  receiptFooter: 'Powered by RNL STUDIO — rnlstudio.online',
   autoClosePrint: true,
   paperSize: '80',
   preferredPrinter: '',
@@ -141,13 +142,11 @@ export default function SettingsForm() {
       </label>
 
       <label>
-        <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>Receipt footer</div>
-        <textarea
-          value={settings.receiptFooter}
-          onChange={e => update('receiptFooter', e.target.value)}
-          placeholder="Optional footer printed on receipts"
-          style={{ width: '100%', minHeight: 64, padding: 8 }}
-        />
+        <div style={{ fontSize: 12, color: '#333', marginBottom: 6 }}>Receipt footer (static)</div>
+        <div style={{ width: '100%', minHeight: 64, padding: 8, border: '1px solid var(--border)', borderRadius: 6, background: '#fafafa' }}>
+          <strong>Powered by RNL STUDIO</strong>
+          <div style={{ marginTop: 6 }}>rnlstudio.online</div>
+        </div>
       </label>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
