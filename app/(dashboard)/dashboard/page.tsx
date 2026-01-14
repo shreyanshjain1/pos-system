@@ -46,43 +46,41 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 18 }}>
-        <h2 style={{ margin: 0 }}>Overview</h2>
-        <p className="muted">Quick summary of today's activity</p>
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold">Overview</h2>
+        <p className="text-sm text-slate-500">Quick summary of today's activity</p>
       </div>
 
       {loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          <div className="card skeleton" style={{ height: 92 }} />
-          <div className="card skeleton" style={{ height: 92 }} />
-          <div className="card skeleton" style={{ height: 92 }} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="h-24 rounded-xl bg-white shadow-sm animate-pulse" />
+          <div className="h-24 rounded-xl bg-white shadow-sm animate-pulse" />
+          <div className="h-24 rounded-xl bg-white shadow-sm animate-pulse" />
         </div>
       )}
 
-      {error && <div className="card" style={{ color: 'red' }}>{error}</div>}
+      {error && <div className="text-red-600">{error}</div>}
 
       {!loading && data && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div className="muted">Today's sales</div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>{data.todaysSales.toFixed ? data.todaysSales.toFixed(2) : data.todaysSales}</div>
-              </div>
+            <div className="flex flex-col">
+              <div className="text-sm text-slate-500">Today's sales</div>
+              <div className="text-2xl font-bold mt-2">{data.todaysSales.toFixed ? data.todaysSales.toFixed(2) : data.todaysSales}</div>
             </div>
           </Card>
 
           <Card>
-            <div>
-              <div className="muted">Total products</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{data.totalProducts}</div>
+            <div className="flex flex-col">
+              <div className="text-sm text-slate-500">Total products</div>
+              <div className="text-2xl font-bold mt-2">{data.totalProducts}</div>
             </div>
           </Card>
 
           <Card>
-            <div>
-              <div className="muted">Low stock (&lt; 5)</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{data.lowStock}</div>
+            <div className="flex flex-col">
+              <div className="text-sm text-slate-500">Low stock (&lt; 5)</div>
+              <div className="text-2xl font-bold mt-2">{data.lowStock}</div>
             </div>
           </Card>
         </div>

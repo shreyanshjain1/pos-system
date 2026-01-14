@@ -30,14 +30,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="app-root">
+    <div className="flex h-screen text-sm">
       <SidebarProvider>
         <ShopProvider>
           {authed && <Sidebar />}
-          <div className="main-col">
+
+          <div className="flex-1 flex flex-col min-h-0">
             {authed && <Topbar />}
-            <main className="main-content">
-              <div className="container">{children}</div>
+
+            <main className="flex-1 overflow-auto bg-slate-50">
+              <div className="container py-8">{children}</div>
             </main>
           </div>
         </ShopProvider>

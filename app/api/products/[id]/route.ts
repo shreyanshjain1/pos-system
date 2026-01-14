@@ -69,6 +69,8 @@ export async function PATCH(req: Request, { params }: { params: any }) {
       if (!mapping || mapping.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // Removed main-POS/device-only restriction: allow product updates for shop members
+
     const updatePayload: any = { name, price: priceNum, stock: stockNum, barcode }
     // sanitize any accidental string 'undefined' values to null
     for (const k of Object.keys(updatePayload)) {

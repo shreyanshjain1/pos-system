@@ -20,19 +20,20 @@ export default function Topbar() {
   const parts = pathname.split('/').filter(Boolean)
   const last = parts.length ? parts[parts.length - 1] : ''
   const title = parts.length === 0 ? 'Dashboard' : humanizeSegment(last || parts[0])
-  const subtitle = parts.length === 0 ? 'Overview of store activity' : `Viewing ${title}`
 
   return (
-    <header className="topbar">
-      <div className="left">
-        <MobileToggle />
-        <div className="title-block">
-          <h1>{title}</h1>
+    <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-gray-100">
+      <div className="container flex items-center justify-between h-16">
+        <div className="flex items-center gap-4">
+          <MobileToggle />
+          <div>
+            <h1 className="text-lg font-semibold text-slate-900">{title}</h1>
+          </div>
         </div>
-      </div>
 
-      <div className="right">
-        <ProfileMenu />
+        <div className="flex items-center gap-3">
+          <ProfileMenu />
+        </div>
       </div>
     </header>
   )
@@ -41,7 +42,7 @@ export default function Topbar() {
 function MobileToggle() {
   const { toggleMobile, mobileOpen } = useSidebar()
   return (
-    <button className="icon-btn" aria-label="Toggle menu" aria-expanded={mobileOpen} onClick={() => toggleMobile()}>
+    <button className="p-2 rounded-md hover:bg-gray-100" aria-label="Toggle menu" aria-expanded={mobileOpen} onClick={() => toggleMobile()}>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
     </button>
   )
@@ -159,30 +160,31 @@ function ProfileMenu() {
   }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button className="icon-btn avatar" aria-label="Account" onClick={() => setOpen(v => !v)}>
-        <div className="avatar-inner">{displayInitial}</div>
+    <div ref={ref} className="relative">
+      <button className="flex items-center gap-2 px-3 py-1 rounded-full bg-white border shadow-sm" aria-label="Account" onClick={() => setOpen(v => !v)}>
+        <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center font-semibold text-sm">{displayInitial}</div>
+        <div className="hidden sm:block text-sm text-slate-700">{displayName}</div>
       </button>
 
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: 48, width: 220, background: '#fff', borderRadius: 10, boxShadow: '0 8px 30px rgba(11,19,42,0.12)', padding: 12, zIndex: 60 }}>
+        <div className="absolute right-0 top-12 w-56 bg-white rounded-lg shadow-lg p-3 z-50">
           {!user ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontWeight: 700 }}>Guest</div>
-              <button className="btn" onClick={() => (window.location.href = '/login')}>Sign in</button>
+            <div className="flex flex-col gap-2">
+              <div className="font-semibold">Guest</div>
+              <button className="px-3 py-2 rounded-md bg-indigo-600 text-white text-sm" onClick={() => (window.location.href = '/login')}>Sign in</button>
             </div>
           ) : (
             <>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
-                      <div style={{ width: 44, height: 44, borderRadius: 8, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 }}>{displayInitial}</div>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</div>
-                      </div>
-                    </div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-11 h-11 rounded-lg bg-gray-100 flex items-center justify-center font-semibold">{displayInitial}</div>
+                <div className="truncate">
+                  <div className="font-semibold text-sm truncate">{displayName}</div>
+                </div>
+              </div>
 
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button className="btn secondary" onClick={() => { setOpen(false); window.location.href = '/settings' }} style={{ justifyContent: 'flex-start' }}>Profile / Settings</button>
-                <button className="btn" onClick={handleLogout} style={{ justifyContent: 'flex-start', background: '#ef4444', boxShadow: 'none' }}>Logout</button>
+              <div className="mt-2 border-t pt-2 flex flex-col gap-2">
+                <button className="text-sm text-left px-2 py-2 rounded-md hover:bg-gray-50" onClick={() => { setOpen(false); window.location.href = '/settings' }}>Profile / Settings</button>
+                <button className="text-sm text-left px-2 py-2 rounded-md text-white bg-red-600 hover:bg-red-700" onClick={handleLogout}>Logout</button>
               </div>
             </>
           )}

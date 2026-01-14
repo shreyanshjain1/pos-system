@@ -1,6 +1,7 @@
 const config = {
   plugins: {
-    // Removed Tailwind plugin to avoid requiring '@tailwindcss/postcss' during build
+    // Ensure the same PostCSS plugin set as CommonJS config
+    '@tailwindcss/postcss': {},
     autoprefixer: {},
   },
 };

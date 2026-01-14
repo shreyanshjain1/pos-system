@@ -16,6 +16,16 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Environment
+
+This project requires Supabase credentials to authenticate users. Create a `.env.local` file at the project root (you can copy `.env.local.example`) and set these values:
+
+- `NEXT_PUBLIC_SUPABASE_URL` — your Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — your Supabase anon/public key
+- `SUPABASE_SERVICE_ROLE_KEY` — your Supabase service role key (server-only, keep secret)
+
+Without these variables the sign-up and sign-in flows will not work. See `.env.local.example` for a template.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

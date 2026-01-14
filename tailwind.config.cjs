@@ -1,12 +1,18 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    "./app/**/*.{js,ts,jsx,tsx}",    // Next.js app directory
-    "./pages/**/*.{js,ts,jsx,tsx}",  // If you use pages directory
-    "./components/**/*.{js,ts,jsx,tsx}"
+  "./app/**/*.{js,ts,jsx,tsx,mdx}",
+  "./components/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
+      container: {
+        center: true,
+        padding: '1rem',
+      },
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+      },
       borderRadius: {
         lg: '12px',
       },

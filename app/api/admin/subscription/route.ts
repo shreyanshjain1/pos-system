@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 
 const OWNER_EMAIL = 'raymart.leyson.rl@gmail.com'
+function isOwnerEmail(email?: string | null) {
+  if (!email) return false
+  return email.toLowerCase().trim() === OWNER_EMAIL.toLowerCase()
+}
 
 export async function POST(req: Request) {
   try {
@@ -17,7 +21,7 @@ export async function POST(req: Request) {
     const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
     if (authErr) throw authErr
     const callerEmail = (authData as any)?.user?.email
-    if (!callerEmail || callerEmail !== OWNER_EMAIL) {
+    if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

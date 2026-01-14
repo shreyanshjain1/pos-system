@@ -1,9 +1,24 @@
 "use client"
 import React, { useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client'
+import { registerDeviceWithServer } from '@/lib/devices'
 import { useRouter } from 'next/navigation'
+import Input from '@/components/ui/Input'
+import Button from '@/components/ui/Button'
 
 export default function LoginPage() {
+	if (!isSupabaseConfigured) {
+		return (
+			<main className="min-h-screen flex items-center justify-center py-12">
+				<div className="w-full max-w-lg md:max-w-xl px-6">
+					<div className="bg-white rounded-2xl shadow-lg p-12 text-center">
+						<h2 className="text-2xl font-semibold mb-3">Supabase not configured</h2>
+						<p className="text-sm text-slate-600 mb-4">Create a <strong>.env.local</strong> from <strong>.env.local.example</strong> and set your Supabase keys.</p>
+					</div>
+				</div>
+			</main>
+		)
+	}
 	const [email, setEmail] = useState('')
 	const [password, setPassword] = useState('')
 	const [loading, setLoading] = useState(false)
@@ -16,130 +31,147 @@ export default function LoginPage() {
 		setLoading(true)
 		setError(null)
 		try {
-			const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+			// signIn with a timeout to avoid UI hanging if network or upstream is unresponsive
+			const signInPromise = supabase.auth.signInWithPassword({ email, password })
+			const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sign in request timed out. Check your network.')), 15000))
+			const result = await Promise.race([signInPromise, timeout]) as any
+			// sign-in result received
+			const { data, error } = result || {}
 			if (error) throw error
 
 			const accessToken = (data as any)?.session?.access_token
 			if (accessToken) {
+					// register this client device with the server (non-blocking if it fails)
+					try {
+						await registerDeviceWithServer(accessToken)
+					} catch (e) {
+						// non-fatal device registration failure
+					}
+
+				let shops: any[] = []
 				try {
 					const resp = await fetch('/api/user-shops', {
 						headers: { Authorization: `Bearer ${accessToken}` }
 					})
 					if (resp.ok) {
 						const payload = await resp.json()
-						const shops = payload?.data || []
+						shops = payload?.data || []
 						if (shops.length > 0) {
 							try { localStorage.setItem('pos:active-shop', shops[0].id) } catch (e) {}
 						} else {
 							try { localStorage.removeItem('pos:active-shop') } catch (_) {}
+							// no shop -> onboarding
 							router.push('/onboard')
 							return
 						}
 					}
 				} catch (e) {
-					console.warn('Failed to fetch user shops', e)
+					// failed to fetch user shops
+				}
+
+				// If user has shops, check BIR acceptance for the active shop
+				if (shops.length > 0) {
+					try {
+						const check = await fetch('/api/check-bir', { headers: { Authorization: `Bearer ${accessToken}` } })
+						if (check.ok) {
+							const j = await check.json()
+							// require both user acceptance and admin approval to go to dashboard
+							if (j.accepted && j.approved) {
+								router.push('/dashboard')
+								return
+							} else {
+								router.push('/onboarding/bir-accept')
+								return
+							}
+						}
+					} catch (e) {
+						// failed to check BIR acceptance
+					}
 				}
 
 			}
 
 			router.push('/pos')
 		} catch (err: any) {
-			setError(err.message || String(err))
+				setError(err.message || String(err))
+				console.error('Sign-in error:', err)
 		} finally {
 			setLoading(false)
 		}
 	}
 
+		// debug helpers removed
+
 	return (
-		<main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-			<form className="form" onSubmit={handleLogin}>
-				<div className="flex-column">
-					<label>Email </label>
-				</div>
-				<div className="inputForm">
-					<svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="0 0 32 32" height="20"><g data-name="Layer 3" id="Layer_3"><path d="m30.853 13.87a15 15 0 0 0 -29.729 4.082 15.1 15.1 0 0 0 12.876 12.918 15.6 15.6 0 0 0 2.016.13 14.85 14.85 0 0 0 7.715-2.145 1 1 0 1 0 -1.031-1.711 13.007 13.007 0 1 1 5.458-6.529 2.149 2.149 0 0 1 -4.158-.759v-10.856a1 1 0 0 0 -2 0v1.726a8 8 0 1 0 .2 10.325 4.135 4.135 0 0 0 7.83.274 15.2 15.2 0 0 0 .823-7.455zm-14.853 8.13a6 6 0 1 1 6-6 6.006 6.006 0 0 1 -6 6z"></path></g></svg>
-					<input
-						placeholder="Enter your Email"
-						className="input"
-						type="email"
-						value={email}
-						onChange={e => setEmail(e.target.value)}
-						required
-					/>
-				</div>
-
-				<div className="flex-column">
-					<label>Password </label>
-				</div>
-				<div className="inputForm">
-					<svg xmlns="http://www.w3.org/2000/svg" width="20" viewBox="-64 0 512 512" height="20"><path d="m336 512h-288c-26.453125 0-48-21.523438-48-48v-224c0-26.476562 21.546875-48 48-48h288c26.453125 0 48 21.523438 48 48v224c0 26.476562-21.546875 48-48 48zm-288-288c-8.8125 0-16 7.167969-16 16v224c0 8.832031 7.1875 16 16 16h288c8.8125 0 16-7.167969 16-16v-224c0-8.832031-7.1875-16-16-16zm0 0"></path><path d="m304 224c-8.832031 0-16-7.167969-16-16v-80c0-52.929688-43.070312-96-96-96s-96 43.070312-96 96v80c0 8.832031-7.167969 16-16 16s-16-7.167969-16-16v-80c0-70.59375 57.40625-128 128-128s128 57.40625 128 128v80c0 8.832031-7.167969 16-16 16zm0 0"></path></svg>
-					<input
-						placeholder="Enter your Password"
-						className="input"
-						type="password"
-						value={password}
-						onChange={e => setPassword(e.target.value)}
-						required
-					/>
-				</div>
-
-				<div className="flex-row">
-					<div>
-						<input id="remember" type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} />
-						<label style={{ marginLeft: 8 }}>Remember me </label>
+		<main className="min-h-screen flex items-center justify-center py-12 bg-slate-50">
+			<div className="w-full max-w-7xl px-6">
+				<div className="bg-white rounded-2xl shadow-lg overflow-hidden grid grid-cols-1 md:grid-cols-12">
+					{/* Left visual panel */}
+					<div className="md:col-span-7 bg-gradient-to-br from-emerald-600 to-emerald-400 text-white p-12 md:p-16 flex flex-col justify-center">
+						<div className="max-w-lg">
+							<div className="w-16 h-16 rounded-full bg-white/20 mb-6 flex items-center justify-center text-2xl font-bold">B</div>
+							<h3 className="text-3xl md:text-4xl font-bold leading-tight mb-4">Welcome back</h3>
+							<p className="text-md md:text-lg opacity-90">Manage sales, inventory and reporting with your POS. Please sign in to continue to your dashboard and point-of-sale.</p>
+						</div>
 					</div>
-					<span className="span">Forgot password?</span>
+
+					{/* Right form panel */}
+					<div className="md:col-span-5 p-8 md:p-12 flex items-center">
+						<div className="w-full">
+							<h2 className="text-2xl md:text-3xl font-semibold mb-1">Sign in</h2>
+							<p className="text-sm text-slate-500 mb-6">Sign in to access your POS</p>
+
+							<form className="space-y-5" onSubmit={handleLogin}>
+								<div>
+									<label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
+									<Input
+										placeholder="Enter your email"
+										type="email"
+										value={email}
+										onChange={e => setEmail(e.target.value)}
+										required
+										className="bg-slate-50 py-3 text-base"
+									/>
+								</div>
+
+								<div>
+									<label className="block text-sm font-medium text-slate-700 mb-2">Password</label>
+									<Input
+										placeholder="Enter your password"
+										type="password"
+										value={password}
+										onChange={e => setPassword(e.target.value)}
+										required
+										className="bg-slate-50 py-3 text-base"
+									/>
+								</div>
+
+								<div className="flex items-center justify-between">
+									<label className="flex items-center gap-3">
+										<input id="remember" type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="h-4 w-4 rounded border-gray-300" />
+										<span className="text-sm text-slate-700">Remember me</span>
+									</label>
+									<button type="button" className="text-indigo-600 hover:underline text-sm" onClick={() => alert('Forgot password flow not implemented')}>Forgot password?</button>
+								</div>
+
+								{error && (
+									<div className="text-red-600 text-sm">
+										<pre className="whitespace-pre-wrap text-xs">{error}</pre>
+									</div>
+								)}
+
+								<div>
+									<Button type="submit" className="w-full h-14 text-base rounded-lg" disabled={loading}>{loading ? 'Signing in…' : 'Sign In'}</Button>
+								</div>
+
+								{/* debug buttons removed */}
+
+								<p className="text-center text-sm text-slate-600">Don't have an account? <button type="button" className="text-indigo-600 font-medium" onClick={() => router.push('/signup')}>Sign up</button></p>
+							</form>
+						</div>
+					</div>
 				</div>
-
-				{error && <div style={{ color: 'red' }}>{error}</div>}
-
-				<button className="button-submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign In'}</button>
-
-				<p className="p">Don't have an account? <span className="span" onClick={() => router.push('/signup')} style={{ cursor: 'pointer' }}>Sign Up</span></p>
-			</form>
-
-			<style jsx>{`
-				.form {
-					display: flex;
-					flex-direction: column;
-					gap: 10px;
-					background-color: #ffffff;
-					padding: 24px;
-					width: min(520px, 95vw);
-					max-height: calc(100vh - 48px);
-					overflow: auto;
-					border-radius: 20px;
-					box-shadow: 0 6px 24px rgba(16,24,40,0.08);
-					font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-				}
-
-				::placeholder { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; }
-
-				.form button { align-self: flex-end; }
-
-				.flex-column > label { color: #151717; font-weight: 600; }
-
-				.inputForm { border: 1.5px solid #ecedec; border-radius: 10px; height: 50px; display: flex; align-items: center; padding-left: 10px; transition: 0.2s ease-in-out; }
-
-				.input { margin-left: 10px; border-radius: 10px; border: none; width: 100%; height: 100%; }
-				.input:focus { outline: none; }
-				.inputForm:focus-within { border: 1.5px solid #2d79f3; }
-
-				.flex-row { display: flex; flex-direction: row; align-items: center; gap: 10px; justify-content: space-between; }
-				.flex-row > div > label { font-size: 14px; color: black; font-weight: 400; }
-
-				.span { font-size: 14px; margin-left: 5px; color: #2d79f3; font-weight: 500; cursor: pointer; }
-
-				.button-submit { margin: 20px 0 10px 0; background-color: #151717; border: none; color: white; font-size: 15px; font-weight: 500; border-radius: 10px; height: 50px; width: 100%; cursor: pointer; }
-
-				.p { text-align: center; color: black; font-size: 14px; margin: 5px 0; }
-
-				.btn { margin-top: 10px; width: 100%; height: 50px; border-radius: 10px; display: flex; justify-content: center; align-items: center; font-weight: 500; gap: 10px; border: 1px solid #ededef; background-color: white; cursor: pointer; transition: 0.2s ease-in-out; }
-				.btn:hover { border: 1px solid #2d79f3; }
-
-				.google { flex: 1; }
-				.apple { flex: 1; }
-			`}</style>
+			</div>
 		</main>
 	)
 }

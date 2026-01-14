@@ -11,12 +11,19 @@
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/supabase-js": "^2.90.1",
+    "@zxing/browser": "^0.1.5",
+    "framer-motion": "^12.26.2",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
+  "optionalDependencies": {
+    "nodemailer": "^7.0.12"
+  },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^20",
+    "@types/nodemailer": "^7.0.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.23",

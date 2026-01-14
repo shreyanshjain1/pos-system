@@ -47,120 +47,117 @@ export default function DemoPOS() {
   }
 
   return (
-    <div className="main-content">
+    <div className="w-full">
       <div className="container">
-        <div className="topbar" style={{ marginBottom: 12 }}>
-          <div className="left">
-            <div className="title-block">
-              <h1 style={{ margin: 0 }}>Demo — Point of Sale</h1>
-              <p className="muted" style={{ margin: 0 }}>Read-only demo with mock data (no database writes)</p>
-            </div>
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold">Demo — Point of Sale</h1>
+            <p className="text-sm text-slate-500">Read-only demo with mock data (no database writes)</p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn secondary" onClick={() => { setCart([]); setReceipt(null) }}>Reset Demo</button>
-            <button className="btn" onClick={() => alert('Demo mode — no auth required')}>Try Demo</button>
+
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => { setCart([]); setReceipt(null) }}>Reset Demo</Button>
+            <Button onClick={() => alert('Demo mode — no auth required')}>Try Demo</Button>
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 420px', gap: 20 }}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div>
-            <div className="card">
-              <div className="pos-grid">
+            <Card>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {products.map(p => (
-                  <div key={p.id} className={`pos-card ${p.stock <= 0 ? 'disabled' : ''}`} role={p.stock > 0 ? 'button' : undefined} tabIndex={p.stock > 0 ? 0 : -1} onClick={() => { if (p.stock > 0) addToCart(p) }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{p.name}</div>
-                    <div className="price">{formatCurrency(p.price)}</div>
-                    <div className="stock">{p.stock > 0 ? `In stock: ${p.stock}` : 'Out of stock'}</div>
-                  </div>
+                  <button key={p.id} className={`text-left p-3 rounded-xl border border-gray-100 hover:shadow cursor-pointer ${p.stock <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`} onClick={() => { if (p.stock > 0) addToCart(p) }} disabled={p.stock <= 0}>
+                    <div className="font-semibold">{p.name}</div>
+                    <div className="text-sm text-slate-600">{formatCurrency(p.price)}</div>
+                    <div className="text-xs text-slate-400 mt-2">{p.stock > 0 ? `In stock: ${p.stock}` : 'Out of stock'}</div>
+                  </button>
                 ))}
               </div>
-            </div>
+            </Card>
           </div>
 
           <div>
-            <div className="card">
-              <h3 style={{ marginTop: 0 }}>Cart</h3>
+            <Card>
+              <h3 className="text-lg font-semibold mb-3">Cart</h3>
               {cart.length === 0 ? (
-                <div className="muted">Cart is empty</div>
+                <div className="text-sm text-slate-500">Cart is empty</div>
               ) : (
-                <div>
+                <div className="space-y-3">
                   {cart.map(i => (
-                    <div key={i.product.id} className="cart-item">
-                      <div className="meta">
-                        <div className="title">{i.product.name}</div>
-                        <div className="subtitle">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
+                    <div key={i.product.id} className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{i.product.name}</div>
+                        <div className="text-sm text-slate-500">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div className="qty-controls">
-                          <button className="qty-btn" onClick={() => setCart(prev => prev.map(it => it.product.id === i.product.id ? { ...it, qty: Math.max(1, it.qty - 1) } : it))}>−</button>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center border rounded-md overflow-hidden">
+                          <button className="px-3" onClick={() => setCart(prev => prev.map(it => it.product.id === i.product.id ? { ...it, qty: Math.max(1, it.qty - 1) } : it))}>−</button>
                           <input aria-label="quantity" type="number" value={i.qty} onChange={(e) => {
                             const v = Math.max(1, Math.min(i.product.stock, Number(e.target.value) || 1))
                             setCart(prev => prev.map(it => it.product.id === i.product.id ? { ...it, qty: v } : it))
-                          }} />
-                          <button className="qty-btn" onClick={() => setCart(prev => prev.map(it => it.product.id === i.product.id ? { ...it, qty: Math.min(i.product.stock, it.qty + 1) } : it))}>+</button>
+                          }} className="w-12 text-center border-l border-r" />
+                          <button className="px-3" onClick={() => setCart(prev => prev.map(it => it.product.id === i.product.id ? { ...it, qty: Math.min(i.product.stock, it.qty + 1) } : it))}>+</button>
                         </div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <button className="icon-small" onClick={() => setCart(prev => prev.filter(it => it.product.id !== i.product.id))}>Remove</button>
-                        </div>
+                        <button className="text-sm text-red-600" onClick={() => setCart(prev => prev.filter(it => it.product.id !== i.product.id))}>Remove</button>
                       </div>
                     </div>
                   ))}
 
-                  <div className="cart-footer">
-                    <div style={{ fontWeight: 700 }}>Total</div>
-                    <div style={{ fontWeight: 700 }}>{formatCurrency(computeTotal())}</div>
+                  <div className="flex items-center justify-between font-semibold mt-4">
+                    <div>Total</div>
+                    <div>{formatCurrency(computeTotal())}</div>
                   </div>
 
-                  <div style={{ marginTop: 12 }}>
-                    <button className="btn full" onClick={handleCheckout}>Complete (Demo)</button>
+                  <div className="mt-4">
+                    <Button className="w-full" onClick={handleCheckout}>Complete (Demo)</Button>
                   </div>
                 </div>
               )}
-            </div>
+            </Card>
 
-            <div style={{ marginTop: 16 }} className="card">
-              <h3 style={{ marginTop: 0 }}>Recent Sales (Demo)</h3>
-              {MOCK_SALES.map(s => (
-                <div key={s.id} style={{ padding: '8px 0', borderBottom: '1px solid #f1f1f1' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <div style={{ fontWeight: 600 }}>{new Date(s.created_at).toLocaleString()}</div>
-                    <div style={{ fontWeight: 700 }}>{formatCurrency(s.total)}</div>
+            <Card className="mt-4">
+              <h3 className="text-lg font-semibold mb-3">Recent Sales (Demo)</h3>
+              <div className="space-y-3">
+                {MOCK_SALES.map(s => (
+                  <div key={s.id} className="py-2 border-b last:border-b-0">
+                    <div className="flex justify-between">
+                      <div className="font-medium">{new Date(s.created_at).toLocaleString()}</div>
+                      <div className="font-semibold">{formatCurrency(s.total)}</div>
+                    </div>
+                    <div className="text-sm text-slate-500 mt-1">{s.items.map((it: any) => `${it.name} ×${it.qty}`).join(', ')}</div>
                   </div>
-                  <div style={{ fontSize: 13, color: '#666', marginTop: 6 }}>
-                    {s.items.map((it: any) => `${it.name} ×${it.qty}`).join(', ')}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </Card>
           </div>
         </div>
 
         {receipt && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
-            <div style={{ width: 480 }}>
-              <div className="card">
-                <h3 style={{ marginTop: 0 }}>Demo Receipt</h3>
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="w-full max-w-lg">
+              <Card>
+                <h3 className="text-lg font-semibold mb-3">Demo Receipt</h3>
                 <div>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>Sale ID: {receipt.id}</div>
-                  <div style={{ marginBottom: 8 }}>{new Date(receipt.created_at).toLocaleString()}</div>
-                  <div style={{ borderTop: '1px solid #eee', paddingTop: 8 }}>
+                  <div className="font-semibold mb-2">Sale ID: {receipt.id}</div>
+                  <div className="mb-2 text-sm text-slate-500">{new Date(receipt.created_at).toLocaleString()}</div>
+                  <div className="border-t pt-2">
                     {receipt.items.map((it: any, idx: number) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <div key={idx} className="flex justify-between py-1">
                         <div>{it.name} ×{it.qty}</div>
                         <div>{formatCurrency(it.price * it.qty)}</div>
                       </div>
                     ))}
                   </div>
-                  <div style={{ borderTop: '1px solid #eee', paddingTop: 8, marginTop: 8, display: 'flex', justifyContent: 'space-between' }}>
-                    <div style={{ fontWeight: 700 }}>Total</div>
-                    <div style={{ fontWeight: 700 }}>{formatCurrency(receipt.total)}</div>
+                  <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
+                    <div>Total</div>
+                    <div>{formatCurrency(receipt.total)}</div>
                   </div>
                 </div>
 
-                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                  <button className="btn secondary" onClick={() => setReceipt(null)}>Close</button>
+                <div className="mt-4 flex justify-end">
+                  <Button variant="secondary" onClick={() => setReceipt(null)}>Close</Button>
                 </div>
-              </div>
+              </Card>
             </div>
           </div>
         )}

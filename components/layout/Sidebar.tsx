@@ -80,82 +80,47 @@ export default function Sidebar() {
   }, [collapsed])
 
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
-      <div className="brand">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'space-between' }}>
-          <div onClick={() => setCollapsed(v => !v)} className="logo" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div className="mark">R</div>
-            {!collapsed && <span className="brand-text" >RNL POS</span>}
-          </div>
-          {mobileOpen && (
-            <button className="icon-btn" aria-label="Close menu" onClick={() => setMobileOpen(false)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </button>
-          )}
+    <aside className={`flex-shrink-0 h-screen bg-white border-r border-gray-100 ${collapsed ? 'w-20' : 'w-72'} hidden md:flex flex-col`}>
+      <div className="px-4 py-5 flex items-center justify-between">
+        <div onClick={() => setCollapsed(v => !v)} className="flex items-center gap-3 cursor-pointer">
+          <div className="w-10 h-10 bg-indigo-600 text-white rounded-md flex items-center justify-center font-bold">R</div>
+          {!collapsed && <span className="font-semibold text-slate-900">RNL POS</span>}
         </div>
+        {mobileOpen && (
+          <button className="p-2 rounded-md hover:bg-gray-100" aria-label="Close menu" onClick={() => setMobileOpen(false)}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+        )}
       </div>
 
-      <nav className="nav">
-        <ul>
+      <nav className="flex-1 overflow-auto px-2 py-4">
+        <ul className="space-y-1">
           {NAV.map(item => (
             <li key={item.href}>
               <Link
                 href={item.href}
-                className={`nav-link ${collapsed ? 'center' : ''}`}
+                className={`flex items-center gap-3 w-full text-sm text-slate-700 hover:bg-gray-50 rounded-md px-3 py-2 ${collapsed ? 'justify-center' : ''}`}
                 aria-label={item.label}
                 title={item.label}
                 onMouseEnter={() => setHovered(item.href)}
                 onMouseLeave={() => setHovered('')}
-                style={{ position: 'relative' }}
               >
-                {item.icon}
-                {!collapsed ? (
-                  <span className="nav-label">{item.label}</span>
-                ) : (
-                  hovered === item.href && (
-                    <span
-                      className="nav-tooltip"
-                      style={{
-                        position: 'absolute',
-                        left: 'calc(100% + 8px)',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'rgba(0,0,0,0.85)',
-                        color: '#fff',
-                        padding: '6px 8px',
-                        borderRadius: 6,
-                        whiteSpace: 'nowrap',
-                        fontSize: 13,
-                        zIndex: 40,
-                      }}
-                    >
-                      {item.label}
-                    </span>
-                  )
-                )}
+                <span className="w-5 h-5 text-slate-600">{item.icon}</span>
+                {!collapsed && <span className="truncate">{item.label}</span>}
               </Link>
             </li>
           ))}
 
-          {/* Admin link - visible only to owner email */}
           {userEmail === 'raymart.leyson.rl@gmail.com' && (
             <li>
-              <Link href="/admin" className={`nav-link ${collapsed ? 'center' : ''}`} aria-label="Admin" title="Admin" onMouseEnter={() => setHovered('/admin')} onMouseLeave={() => setHovered('')} style={{ position: 'relative' }}>
-                {ICON(
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false">
-                    <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" />
-                  </svg>
-                )}
-                {!collapsed ? <span className="nav-label">Admin</span> : (hovered === '/admin' && (
-                  <span className="nav-tooltip" style={{ position: 'absolute', left: 'calc(100% + 8px)', top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '6px 8px', borderRadius: 6, whiteSpace: 'nowrap', fontSize: 13, zIndex: 40 }}>Admin</span>
-                ))}
+              <Link href="/admin" className={`flex items-center gap-3 w-full text-sm text-slate-700 hover:bg-gray-50 rounded-md px-3 py-2 ${collapsed ? 'justify-center' : ''}`} aria-label="Admin" title="Admin">
+                <span className="w-5 h-5 text-slate-600">{ICON(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" /></svg>)}</span>
+                {!collapsed && <span className="truncate">Admin</span>}
               </Link>
             </li>
           )}
         </ul>
       </nav>
-
-      {/* Footer intentionally left empty (logout removed) */}
     </aside>
   )
 }

@@ -1,9 +1,23 @@
 "use client"
 import React, { useState } from 'react'
-import { supabase } from '@/lib/supabase/client'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import Input from '@/components/ui/Input'
+import Button from '@/components/ui/Button'
 
 export default function SignupPage() {
+	if (!isSupabaseConfigured) {
+		return (
+			<main className="min-h-screen flex items-center justify-center py-12">
+				<div className="w-full max-w-lg md:max-w-xl px-6">
+					<div className="bg-white rounded-2xl shadow-lg p-12 text-center">
+						<h2 className="text-2xl font-semibold mb-3">Supabase not configured</h2>
+						<p className="text-sm text-slate-600 mb-4">Create a <strong>.env.local</strong> from <strong>.env.local.example</strong> and set your Supabase keys.</p>
+					</div>
+				</div>
+			</main>
+		)
+	}
 	const [email, setEmail] = useState('')
 	const [password, setPassword] = useState('')
 	const [confirmPassword, setConfirmPassword] = useState('')
@@ -70,82 +84,55 @@ export default function SignupPage() {
 	}
 
 	return (
-		<main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-			<form className="form" onSubmit={handleSignup}>
-				<div style={{ textAlign: 'center', marginBottom: 8 }}>
-					<h2 style={{ margin: 0 }}>Create account</h2>
+		<main className="min-h-screen flex items-center justify-center py-12 bg-slate-50">
+			<div className="w-full max-w-7xl px-6">
+				<div className="bg-white rounded-2xl shadow-lg overflow-hidden grid grid-cols-1 md:grid-cols-12">
+					{/* Left visual panel */}
+					<div className="md:col-span-7 bg-gradient-to-br from-emerald-600 to-emerald-400 text-white p-12 md:p-16 flex flex-col justify-center">
+						<div className="max-w-lg">
+							<div className="w-16 h-16 rounded-full bg-white/20 mb-6 flex items-center justify-center text-2xl font-bold">B</div>
+							<h3 className="text-3xl md:text-4xl font-bold leading-tight mb-4">Create your account</h3>
+							<p className="text-md md:text-lg opacity-90">Set up your account to manage sales, inventory and reporting with your POS.</p>
+						</div>
+					</div>
+
+					{/* Right form panel */}
+					<div className="md:col-span-5 p-8 md:p-12 flex items-center">
+						<div className="w-full">
+							<h2 className="text-2xl md:text-3xl font-semibold mb-1">Create account</h2>
+							<p className="text-sm text-slate-500 mb-6">Create an account to get started</p>
+
+							<form className="space-y-5" onSubmit={handleSignup}>
+								<div>
+									<label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
+									<Input value={email} onChange={e => setEmail(e.target.value)} placeholder="Enter your email" type="email" required className="bg-slate-50 py-3 text-base" />
+								</div>
+
+								<div>
+									<label className="block text-sm font-medium text-slate-700 mb-2">Password</label>
+									<Input value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter a password" type="password" required className="bg-slate-50 py-3 text-base" />
+								</div>
+
+								<div>
+									<label className="block text-sm font-medium text-slate-700 mb-2">Confirm password</label>
+									<Input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm password" type="password" required className="bg-slate-50 py-3 text-base" />
+								</div>
+
+								{error && (
+									<div className="text-red-600 text-sm"><pre className="whitespace-pre-wrap text-xs">{error}</pre></div>
+								)}
+								{message && <div className="text-green-600 text-sm">{message}</div>}
+
+								<div>
+									<Button type="submit" className="w-full h-14 text-base rounded-lg" disabled={loading}>{loading ? 'Creating account…' : 'Create account'}</Button>
+								</div>
+
+								<p className="text-center text-sm text-slate-600">Already have an account? <button type="button" className="text-indigo-600 font-medium" onClick={() => router.push('/login')}>Sign in</button></p>
+							</form>
+						</div>
+					</div>
 				</div>
-				<div className="flex-column">
-					<label>Email</label>
-				</div>
-				<div className="inputForm">
-					<input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" type="email" className="input" />
-				</div>
-
-				<div className="flex-column">
-					<label>Password</label>
-				</div>
-				<div className="inputForm">
-					<input value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" type="password" className="input" />
-				</div>
-
-				<div className="flex-column">
-					<label>Confirm password</label>
-				</div>
-				<div className="inputForm">
-					<input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm password" type="password" className="input" />
-				</div>
-
-				{error && <div style={{ color: 'red' }}>{error}</div>}
-				{message && <div style={{ color: 'green' }}>{message}</div>}
-
-				<button className="button-submit" disabled={loading}>{loading ? 'Creating account…' : 'Create account'}</button>
-
-				<p className="p">Already have an account? <span className="span" onClick={() => router.push('/login')} style={{ cursor: 'pointer' }}>Sign In</span></p>
-
-			<style jsx>{`
-				.form {
-					display: flex;
-					flex-direction: column;
-					gap: 10px;
-					background-color: #ffffff;
-					padding: 24px;
-					width: min(520px, 95vw);
-					max-height: calc(100vh - 48px);
-					overflow: auto;
-					border-radius: 20px;
-					box-shadow: 0 6px 24px rgba(16,24,40,0.08);
-					font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-				}
-
-				::placeholder { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; }
-
-				.form button { align-self: flex-end; }
-
-				.flex-column > label { color: #151717; font-weight: 600; }
-
-				.inputForm { border: 1.5px solid #ecedec; border-radius: 10px; height: 50px; display: flex; align-items: center; padding-left: 10px; transition: 0.2s ease-in-out; }
-
-				.input { margin-left: 10px; border-radius: 10px; border: none; width: 100%; height: 100%; }
-				.input:focus { outline: none; }
-				.inputForm:focus-within { border: 1.5px solid #2d79f3; }
-
-				.flex-row { display: flex; flex-direction: row; align-items: center; gap: 10px; justify-content: space-between; }
-				.flex-row > div > label { font-size: 14px; color: black; font-weight: 400; }
-
-				.span { font-size: 14px; margin-left: 5px; color: #2d79f3; font-weight: 500; cursor: pointer; }
-
-				.button-submit { margin: 20px 0 10px 0; background-color: #151717; border: none; color: white; font-size: 15px; font-weight: 500; border-radius: 10px; height: 50px; width: 100%; cursor: pointer; }
-
-				.p { text-align: center; color: black; font-size: 14px; margin: 5px 0; }
-
-				.btn { margin-top: 10px; width: 100%; height: 50px; border-radius: 10px; display: flex; justify-content: center; align-items: center; font-weight: 500; gap: 10px; border: 1px solid #ededef; background-color: white; cursor: pointer; transition: 0.2s ease-in-out; }
-				.btn:hover { border: 1px solid #2d79f3; }
-
-				.google { flex: 1; }
-				.apple { flex: 1; }
-			`}</style>
-			</form>
+			</div>
 		</main>
 	)
 }

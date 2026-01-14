@@ -1,5 +1,4 @@
 import React from 'react'
-import AuthGate from '@/components/auth/AuthGate'
 import Layout from '@/components/layout/Layout'
 
 export const metadata = {
@@ -8,8 +7,6 @@ export const metadata = {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthGate>
-      <Layout>{children}</Layout>
-    </AuthGate>
+    <Layout>{children}</Layout>
   )
 }

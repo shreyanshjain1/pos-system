@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 import { useRouter } from 'next/navigation'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
 
 function GuestHero() {
   const router = useRouter()
@@ -22,16 +24,16 @@ function GuestHero() {
   }
 
   return (
-    <div style={{ paddingTop: 80, paddingBottom: 80, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ maxWidth: 720, width: '100%' }}>
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Welcome to Store POS</h2>
-          <p className="muted">Please sign in to access the dashboard and POS features.</p>
-          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-            <button className="btn" onClick={() => router.push('/login')}>Sign in</button>
-            <button className="btn secondary" onClick={handleTest} disabled={testing}>{testing ? 'Testing…' : 'Test'}</button>
+    <div className="py-20 flex items-center justify-center">
+      <div className="max-w-3xl w-full px-4">
+        <Card>
+          <h2 className="mt-0 text-xl font-semibold">Welcome to Store POS</h2>
+          <p className="text-gray-500">Please sign in to access the dashboard and POS features.</p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Button onClick={() => router.push('/login')}>Sign in</Button>
+            <Button variant="secondary" onClick={handleTest} disabled={testing}>{testing ? 'Testing…' : 'Test'}</Button>
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   )

@@ -15,9 +15,15 @@ export default function AdminUsersPage() {
   const [email, setEmail] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [editing, setEditing] = useState<Record<string, { plan?: string | null; expiry_date?: string | null }>>({})
+  const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     let mounted = true
+    
+    const checkMobile = () => setIsMobile(window.innerWidth <= 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    
     ;(async () => {
       try {
         const session = await supabase.auth.getSession()
@@ -34,7 +40,7 @@ export default function AdminUsersPage() {
         if (mounted) setLoading(false)
       }
     })()
-    return () => { mounted = false }
+    return () => { mounted = false; window.removeEventListener('resize', checkMobile) }
   }, [])
 
   async function refreshList() {
@@ -111,108 +117,89 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700 }}>Admin — Users</h2>
-      <p style={{ marginBottom: 12 }}>Manage application users. Invite new users or view existing accounts.</p>
+    <div className="p-6">
+      <h2 className="text-xl font-semibold">Admin — Users</h2>
+      <p className="text-sm text-slate-500 mb-4">Manage application users. Invite new users or view existing accounts.</p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16, alignItems: 'start' }}>
+      <div className="grid grid-cols-1 gap-4 items-start">
         <section>
-          <Card>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>Users</h3>
+          <Card className="p-6 min-h-[24rem]">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-medium">Users</h3>
               <div>
-                <Button className="secondary" onClick={() => refreshList()}>Refresh</Button>
+                <Button intent="secondary" onClick={() => refreshList()}>Refresh</Button>
               </div>
             </div>
 
             {loading ? (
               <div>Loading…</div>
             ) : (
-              <table className="users-table">
-                <thead>
-                  <tr>
-                    <th>Email</th>
-                    <th>Created</th>
-                    <th>Plan</th>
-                    <th>Expiry</th>
-                    <th>Status</th>
-                    <th style={{ width: 180 }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.length === 0 && (
-                    <tr><td colSpan={6} style={{ padding: 12 }}>No users found.</td></tr>
-                  )}
-                  {users.map(u => {
-                    const edit = editing[u.id]
-                    return (
-                      <tr key={u.id}>
-                        <td>
-                          <div className="user-email">{u.email ?? <em>(no email)</em>}</div>
-                        </td>
-                        <td><div className="user-created">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</div></td>
-                        <td>
-                          {edit ? (
-                            <select value={edit.plan ?? ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), plan: e.target.value || null } }))}>
-                              <option value="">(none)</option>
-                              {PLANS.map(p => <option key={p} value={p}>{p}</option>)}
-                            </select>
-                          ) : (
-                            u.plan || <em>not set</em>
-                          )}
-                        </td>
-                        <td>
-                          {edit ? (
-                            <input type="datetime-local" value={edit.expiry_date ? new Date(edit.expiry_date).toISOString().slice(0,16) : ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), expiry_date: e.target.value ? new Date(e.target.value).toISOString() : null } }))} />
-                          ) : (
-                            u.expiry_date ? new Date(u.expiry_date).toLocaleString() : <em>not set</em>
-                          )}
-                        </td>
-                        <td>
-                          {statusFor(u) === 'active' && <span className="badge active">Active</span>}
-                          {statusFor(u) === 'expired' && <span className="badge expired">Expired</span>}
-                          {statusFor(u) === 'locked' && <span className="badge locked">Locked</span>}
-                        </td>
-                        <td>
-                          {edit ? (
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <Button onClick={() => saveSubscription(u.id)}>Save</Button>
-                              <Button className="secondary" onClick={() => cancelEdit(u.id)}>Cancel</Button>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <Button onClick={() => startEdit(u)}>Edit</Button>
-                              <Button onClick={() => { setEditing(s => ({ ...s, [u.id]: { plan: null, expiry_date: null } })); saveSubscription(u.id) }}>Lock</Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm table-auto">
+                  <thead>
+                    <tr className="text-slate-600 text-left">
+                      <th className="px-3 py-2">Email</th>
+                      <th className="px-3 py-2">Created</th>
+                      <th className="px-3 py-2">Plan</th>
+                      <th className="px-3 py-2">Expiry</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.length === 0 && (
+                      <tr><td colSpan={6} className="px-3 py-4">No users found.</td></tr>
+                    )}
+                    {users.map(u => {
+                      const edit = editing[u.id]
+                      return (
+                        <tr key={u.id} className="border-t">
+                          <td className="px-3 py-3 align-top">{u.email ?? <em className="text-slate-500">(no email)</em>}</td>
+                          <td className="px-3 py-3 align-top">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</td>
+                          <td className="px-3 py-3 align-top">
+                            {edit ? (
+                              <select className="input" value={edit.plan ?? ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), plan: e.target.value || null } }))}>
+                                <option value="">(none)</option>
+                                {PLANS.map(p => <option key={p} value={p}>{p}</option>)}
+                              </select>
+                            ) : (
+                              u.plan || <em className="text-slate-500">not set</em>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            {edit ? (
+                              <input className="input" type="datetime-local" value={edit.expiry_date ? new Date(edit.expiry_date).toISOString().slice(0,16) : ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), expiry_date: e.target.value ? new Date(e.target.value).toISOString() : null } }))} />
+                            ) : (
+                              u.expiry_date ? new Date(u.expiry_date).toLocaleString() : <em className="text-slate-500">not set</em>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 align-top">
+                            {statusFor(u) === 'active' && <span className="inline-flex items-center px-2 py-1 rounded-md text-xs bg-emerald-100 text-emerald-800">Active</span>}
+                            {statusFor(u) === 'expired' && <span className="inline-flex items-center px-2 py-1 rounded-md text-xs bg-yellow-100 text-yellow-800">Expired</span>}
+                            {statusFor(u) === 'locked' && <span className="inline-flex items-center px-2 py-1 rounded-md text-xs bg-slate-100 text-slate-700">Locked</span>}
+                          </td>
+                          <td className="px-3 py-3 align-top text-right">
+                            {edit ? (
+                              <div className="flex gap-2 justify-end">
+                                <Button onClick={() => saveSubscription(u.id)}>Save</Button>
+                                <Button intent="secondary" onClick={() => cancelEdit(u.id)}>Cancel</Button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-2 justify-end">
+                                <Button onClick={() => startEdit(u)}>Edit</Button>
+                                <Button onClick={() => { setEditing(s => ({ ...s, [u.id]: { plan: null, expiry_date: null } })); saveSubscription(u.id) }}>Lock</Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
         </section>
-
-        <aside>
-          <Card>
-            <h3 style={{ margin: 0, marginBottom: 12 }}>Invite user</h3>
-            <form onSubmit={handleInvite} style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-              <label style={{ display: 'block' }}>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Email</div>
-                <input value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)' }} />
-              </label>
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button type="submit">Send invite</Button>
-                <Link href="/admin"><Button className="secondary">Back</Button></Link>
-              </div>
-
-              {message && <div style={{ marginTop: 8, color: message.includes('failed') || message.includes('error') ? 'crimson' : 'green' }}>{message}</div>}
-            </form>
-          </Card>
-        </aside>
       </div>
     </div>
   )

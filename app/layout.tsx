@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { DeviceProvider } from '@/components/context/DeviceContext'
 
 
 const geistSans = Geist({
@@ -29,7 +30,9 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
+        <DeviceProvider>
+          {children}
+        </DeviceProvider>
       </body>
     </html>
   );

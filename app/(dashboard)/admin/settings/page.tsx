@@ -4,10 +4,10 @@ import Link from 'next/link'
 
 export default function AdminSettingsPage() {
   return (
-    <div style={{ padding: 20 }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700 }}>Admin — Settings</h2>
-      <p>Placeholder for admin settings. Will be owner-only.</p>
-      <p><Link href="/admin">← Back to Admin</Link></p>
+    <div className="p-6">
+      <h2 className="text-xl font-semibold">Admin — Settings</h2>
+      <p className="text-sm text-slate-500">Placeholder for admin settings. Will be owner-only.</p>
+      <p className="mt-4"><Link href="/admin" className="text-emerald-600">← Back to Admin</Link></p>
     </div>
   )
 }

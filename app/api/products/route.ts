@@ -96,6 +96,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No shop mapping for user' }, { status: 403 })
     }
 
+    // Removed main-POS/device-only restriction: allow product creation for mapped shop
+
     const insertPayload: any = { name, price: priceNum, stock: stockNum, barcode, shop_id: assignedShopId }
     // sanitize any accidental string 'undefined' values to null
     for (const k of Object.keys(insertPayload)) {

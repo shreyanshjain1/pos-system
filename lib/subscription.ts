@@ -18,3 +18,16 @@ export async function getSubscriptionStatus(supabaseAdmin: SupabaseClient, userI
     return { active: false, reason: 'error' }
   }
 }
+
+export function getDeviceLimitForPlan(plan?: string | null) {
+  // Define device limits per plan
+  switch ((plan || '').toLowerCase()) {
+    case 'pro':
+      return 3
+    case 'advance':
+      return 10
+    case 'basic':
+    default:
+      return 1
+  }
+}

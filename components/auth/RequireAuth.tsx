@@ -74,7 +74,11 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
     return () => { mounted = false }
   }, [router])
 
-  if (checking) return <div className="card">Checking authentication…</div>
+  if (checking) return <div className="w-full max-w-lg mx-auto py-8">{/* placeholder while auth checking */}
+    <div className="flex items-center justify-center">
+      <div className="animate-pulse bg-gray-100 rounded-xl p-4 w-full text-center">Checking authentication…</div>
+    </div>
+  </div>
 
   return <>{children}</>
 }

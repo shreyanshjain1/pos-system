@@ -1,91 +1,40 @@
 "use client"
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useState } from 'react'
+import Input from '@/components/ui/Input'
+import Button from '@/components/ui/Button'
 
-export default function BarcodeScanner({ onDetected, onClose, deviceId, continueScanning = true }: { onDetected: (code: string) => void; onClose: () => void; deviceId?: string; continueScanning?: boolean }) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const rafRef = useRef<number | null>(null)
-  const [supported, setSupported] = useState<boolean | null>(null)
-  const [error, setError] = useState<string | null>(null)
+export default function BarcodeScanner({ onDetected, onClose }: { onDetected: (code: string) => void; onClose: () => void }) {
+  const [manual, setManual] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
 
-  useEffect(() => {
-    let detector: any = null
-    let mounted = true
-
-    async function start() {
-      try {
-        if (!(navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
-          setSupported(false)
-          return
-        }
-        const constraints: MediaStreamConstraints = { video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' } }
-        const stream = await navigator.mediaDevices.getUserMedia(constraints)
-        streamRef.current = stream
-        if (videoRef.current) videoRef.current.srcObject = stream
-
-        const BarcodeDetectorClass = (window as any).BarcodeDetector
-        if (!BarcodeDetectorClass) {
-          setSupported(false)
-          return
-        }
-
-        detector = new BarcodeDetectorClass({ formats: ['ean_13', 'ean_8', 'qr_code', 'code_128', 'code_39'] })
-        setSupported(true)
-
-        const scan = async () => {
-          try {
-            if (!videoRef.current) return
-            const results = await detector.detect(videoRef.current)
-            if (results && results.length) {
-              const code = results[0].rawValue || results[0].rawData || ''
-              if (code) {
-                onDetected(String(code))
-                if (!continueScanning) return
-                // small pause before next scan to avoid duplicates
-                await new Promise(res => setTimeout(res, 700))
-              }
-            }
-          } catch (err: any) {
-            // ignore detection errors
-          }
-          rafRef.current = requestAnimationFrame(scan)
-        }
-
-        rafRef.current = requestAnimationFrame(scan)
-      } catch (err: any) {
-        console.error('Barcode scanner error', err)
-        setError(err?.message || String(err))
-      }
+  function handleAdd() {
+    const code = String(manual || '').trim()
+    if (!code) {
+      setMessage('Enter a barcode')
+      return
     }
-
-    start()
-
-    return () => {
-      mounted = false
-      try {
-        if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      } catch (_) {}
-      try {
-        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-      } catch (_) {}
+    try {
+      onDetected(code)
+      setMessage('Added: ' + code)
+      setManual('')
+    } catch (e) {
+      setMessage('Failed to add')
     }
-  }, [onDetected])
+  }
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
-        <video ref={videoRef} autoPlay playsInline muted style={{ width: 320, height: 'auto', borderRadius: 6, background: '#000' }} />
+    <div className="flex flex-col gap-3 w-full">
+      <div>
+        <div className="text-sm text-gray-700">Using hardware scanners (keyboard input) only. Or paste type a barcode below.</div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 13 }}>
-          {supported === null && 'Initializing camera…'}
-          {supported === false && 'Barcode scanning not supported in this browser. Use a hardware scanner or enter barcode manually.'}
-          {error && <div style={{ color: 'red' }}>{error}</div>}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn secondary" onClick={onClose}>Close</button>
-        </div>
+
+      <div className="flex gap-2">
+        <Input placeholder="Type or paste barcode, press Enter" value={manual} onChange={e => setManual(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAdd() }} className="flex-1" />
+        <Button onClick={handleAdd}>Add</Button>
+        <Button variant="ghost" onClick={onClose}>Close</Button>
       </div>
+
+      {message && <div className="text-sm text-gray-600">{message}</div>}
     </div>
   )
 }

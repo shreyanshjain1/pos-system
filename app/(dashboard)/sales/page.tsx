@@ -1,10 +1,11 @@
 "use client"
 import React, { useEffect, useState, useRef } from 'react'
-import supabase from '@/lib/supabase/client'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import formatCurrency from '@/lib/format/currency'
+import ReceiptPreview from '@/components/print/ReceiptPreview'
+import ThermalReceipt from '@/components/print/ThermalReceipt'
 
 type SaleItem = { id: string; product_id: string; quantity: number; price: number }
 type Sale = { id: string; total: number; payment_method?: string; created_at?: string; sale_items?: SaleItem[] }
@@ -17,25 +18,20 @@ export default function SalesPage() {
   const [pageSize] = useState(20)
   const [count, setCount] = useState<number | null>(null)
   const [detail, setDetail] = useState<Sale | null>(null)
-  const [realtimeStatus, setRealtimeStatus] = useState<'idle'|'connecting'|'connected'|'error'|'polling'>('idle')
-  const [lastRealtimeAt, setLastRealtimeAt] = useState<number | null>(null)
+
   const pollTimerRef = useRef<number | null>(null)
-  const inspectTimerRef = useRef<number | null>(null)
   const fetchControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => { fetchPage(page) }, [page])
 
-  // Realtime for sales intentionally disabled — products are realtime-only.
-  // Keep a lightweight effect so `page` dependency remains available for future logic.
   useEffect(() => {
     return () => {
       try { if (pollTimerRef.current) { window.clearInterval(pollTimerRef.current); pollTimerRef.current = null } } catch(_) {}
-      try { if (inspectTimerRef.current) { window.clearInterval(inspectTimerRef.current); inspectTimerRef.current = null } } catch(_) {}
+      try { fetchControllerRef.current?.abort() } catch (_) {}
     }
-  }, [page])
+  }, [])
 
   async function fetchPage(p: number) {
-    // Cancel previous inflight request to keep UI snappy
     try { fetchControllerRef.current?.abort() } catch (_) {}
     const controller = new AbortController()
     fetchControllerRef.current = controller
@@ -45,7 +41,6 @@ export default function SalesPage() {
     try {
       const res = await fetchWithAuth(`/api/sales?page=${p}&pageSize=${pageSize}`, { signal: controller.signal })
       if (res.status === 401) {
-        // No mapping or no token — send user to onboarding to create/map a shop
         window.location.href = '/onboard'
         return
       }
@@ -54,10 +49,7 @@ export default function SalesPage() {
       setSales(json.data || [])
       setCount(json.count ?? null)
     } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        // abort: ignore
-        return
-      }
+      if (err?.name === 'AbortError') return
       setError(err?.message || 'Failed to load')
     } finally {
       setLoading(false)
@@ -69,60 +61,53 @@ export default function SalesPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Sales</h2>
-          <p className="muted">Sale history and receipts</p>
-        </div>
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold">Sales</h2>
+        <p className="text-sm text-slate-500">Sale history and receipts</p>
       </div>
 
       <Card>
         {loading ? (
-          <div className="skeleton" style={{ height: 180 }} />
+          <div className="h-44 animate-pulse bg-white rounded-md" />
         ) : error ? (
-          <div style={{ color: 'red' }}>{error}</div>
+          <div className="text-red-600">{error}</div>
         ) : (
           <div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm">
               <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: '8px' }}>ID</th>
-                  <th style={{ textAlign: 'left', padding: '8px' }}>Date</th>
-                  <th style={{ textAlign: 'right', padding: '8px' }}>Total</th>
-                  <th style={{ textAlign: 'left', padding: '8px' }}>Payment</th>
-                  <th style={{ textAlign: 'right', padding: '8px' }}>Items</th>
-                  <th style={{ textAlign: 'right', padding: '8px' }}>Actions</th>
+                <tr className="text-slate-600">
+                  <th className="py-2 text-left">ID</th>
+                  <th className="py-2 text-left">Date</th>
+                  <th className="py-2 text-right">Total</th>
+                  <th className="py-2 text-left">Payment</th>
+                  <th className="py-2 text-right">Items</th>
+                  <th className="py-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {sales.map(s => (
-                  <tr key={s.id}>
-                    <td style={{ padding: '8px' }}>{s.id}</td>
-                    <td style={{ padding: '8px' }}>{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</td>
-                    <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(s.total)}</td>
-                    <td style={{ padding: '8px' }}>{s.payment_method ?? '—'}</td>
-                    <td style={{ padding: '8px', textAlign: 'right' }}>{(s.sale_items || []).length}</td>
-                    <td style={{ padding: '8px', textAlign: 'right' }}>
+                  <tr key={s.id} className="border-t border-gray-100">
+                    <td className="py-3">{s.id}</td>
+                    <td className="py-3">{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</td>
+                    <td className="py-3 text-right">{formatCurrency(s.total)}</td>
+                    <td className="py-3">{s.payment_method ?? '—'}</td>
+                    <td className="py-3 text-right">{(s.sale_items || []).length}</td>
+                    <td className="py-3 text-right">
                       <Button onClick={() => setDetail(s)}>View</Button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-              <div className="muted">{count ? `${count} sales` : ''}</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button onClick={() => {
-                  // clear polling when user navigates pages to avoid racing fetches
-                  try { if (pollTimerRef.current) { window.clearInterval(pollTimerRef.current); pollTimerRef.current = null; setRealtimeStatus('connected') } } catch(_){}
-                  setPage(p => Math.max(1, p - 1))
-                }} disabled={page <= 1}>Prev</Button>
-                <div style={{ alignSelf: 'center' }}>{page}{totalPages ? ` / ${totalPages}` : ''}</div>
-                <Button onClick={() => {
-                  try { if (pollTimerRef.current) { window.clearInterval(pollTimerRef.current); pollTimerRef.current = null; setRealtimeStatus('connected') } } catch(_){}
-                  setPage(p => p + 1)
-                }} disabled={totalPages ? page >= totalPages : sales.length < pageSize}>Next</Button>
+            <div className="mt-4 flex items-center justify-between flex-wrap gap-3">
+              <div className="text-sm text-slate-500">{count ? `${count} sales` : ''}</div>
+              <div className="flex items-center gap-2">
+                <Button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
+                <div className="text-sm">{page}{totalPages ? ` / ${totalPages}` : ''}</div>
+                <Button onClick={() => setPage(p => p + 1)} disabled={totalPages ? page >= totalPages : sales.length < pageSize}>Next</Button>
               </div>
             </div>
           </div>
@@ -130,25 +115,37 @@ export default function SalesPage() {
       </Card>
 
       {detail && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
-          <div style={{ width: 640 }}>
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="w-full max-w-2xl">
             <Card>
-              <h3 style={{ marginTop: 0 }}>Sale Details</h3>
-              <div style={{ marginBottom: 8 }}><strong>Sale:</strong> {detail.id}</div>
-              <div style={{ marginBottom: 8 }}><strong>Date:</strong> {detail.created_at ? new Date(detail.created_at).toLocaleString() : ''}</div>
-              <div style={{ marginBottom: 8 }}><strong>Payment:</strong> {detail.payment_method ?? '—'}</div>
-              <div style={{ marginBottom: 8 }}><strong>Total:</strong> {formatCurrency(detail.total)}</div>
-              <hr />
-              <div style={{ maxHeight: '50vh', overflow: 'auto', marginTop: 8 }}>
-                {(detail.sale_items || []).map((it: any) => (
-                  <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                    <div>{it.product?.name ?? it.product_name ?? it.product_id}</div>
-                    <div className="muted">{it.quantity} × {formatCurrency(it.price ?? 0)}</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold mb-3">Receipt preview</h3>
+                  <ReceiptPreview
+                    storeName={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.storeName || 'Store') : 'Store'}
+                    header={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.receiptHeader || '') : ''}
+                    footer={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.receiptFooter || '') : ''}
+                    items={(detail.sale_items || []).map((it: any) => ({ name: it.product?.name ?? it.product_name ?? it.product_id, qty: it.quantity, price: it.price ?? 0 }))}
+                    total={detail.total}
+                    currency={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.currency || 'PHP') : 'PHP'}
+                  />
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-semibold mb-3">Sale Details</h3>
+                  <div className="mb-2"><strong>Sale:</strong> {detail.id}</div>
+                  <div className="mb-2"><strong>Date:</strong> {detail.created_at ? new Date(detail.created_at).toLocaleString() : ''}</div>
+                  <div className="mb-2"><strong>Payment:</strong> {detail.payment_method ?? '—'}</div>
+                  <div className="mb-2"><strong>Total:</strong> {formatCurrency(detail.total)}</div>
+
+                  <div className="mt-3">
+                    <ThermalReceipt sale={{ id: detail.id, created_at: detail.created_at, items: (detail.sale_items || []).map((it: any) => ({ name: it.product?.name ?? it.product_name ?? it.product_id, qty: it.quantity, price: it.price ?? 0 })), total: detail.total }} />
                   </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                 <Button onClick={() => setDetail(null)}>Close</Button>
+
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button onClick={() => setDetail(null)}>Close</Button>
+                  </div>
+                </div>
               </div>
             </Card>
           </div>
