@@ -1,5 +1,5 @@
 "use client"
-import React, { useRef } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 
 type SaleItem = {
   id?: string
@@ -197,22 +197,47 @@ export default function ThermalReceipt({ sale }: { sale: Sale }) {
       } catch (err) {
         // ignore
       }
-      // reload the current page a short time after printing so UI updates propagate
-      try {
-        if (typeof window !== 'undefined') {
-          setTimeout(() => {
-            try { window.location.reload() } catch (_) {}
-          }, 1000)
-        }
-      } catch (_) {}
     }, 300)
+  }
+
+  const [countdown, setCountdown] = useState<number | null>(null)
+  const countdownRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      try { if (countdownRef.current) window.clearInterval(countdownRef.current) } catch (_) {}
+    }
+  }, [])
+
+  function startCountdownAndReload(seconds = 2) {
+    try {
+      if (typeof window === 'undefined') return
+      setCountdown(seconds)
+      try { if (countdownRef.current) window.clearInterval(countdownRef.current) } catch (_) {}
+      countdownRef.current = window.setInterval(() => {
+        setCountdown(prev => {
+          if (prev === null) return null
+          if (prev <= 1) {
+            try { if (countdownRef.current) window.clearInterval(countdownRef.current) } catch (_) {}
+            try { window.dispatchEvent(new CustomEvent('pos:receipt:close')) } catch (_) {}
+            try { window.location.reload() } catch (_) {}
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+    } catch (_) {}
   }
 
   return (
     <div>
       <div ref={ref} style={{ display: 'none' }} />
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={handlePrint} style={{ padding: '8px 12px' }}>Print receipt</button>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {countdown === null ? (
+          <button onClick={() => { handlePrint(); startCountdownAndReload(2) }} style={{ padding: '8px 12px' }}>Print receipt</button>
+        ) : (
+          <div style={{ padding: '8px 12px' }}>Reloading in {countdown}s…</div>
+        )}
       </div>
     </div>
   )

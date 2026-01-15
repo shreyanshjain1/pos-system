@@ -160,6 +160,13 @@ export default function POSPage() {
     }
   }, [])
 
+  // Listen for receipt close event (dispatched by ThermalReceipt countdown)
+  useEffect(() => {
+    const onReceiptClose = () => { try { setReceipt(null) } catch (_) {} }
+    try { window.addEventListener('pos:receipt:close', onReceiptClose as EventListener) } catch (_) {}
+    return () => { try { window.removeEventListener('pos:receipt:close', onReceiptClose as EventListener) } catch (_) {} }
+  }, [])
+
   // Device-ID based enforcement removed: allow all devices to create/checkout
 
   // Offline sync removed: no background queue or periodic sync
@@ -316,14 +323,6 @@ export default function POSPage() {
       }
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
-      // after successful checkout, reload the page after 1s to pick up updates
-      try {
-        if (typeof window !== 'undefined') {
-          setTimeout(() => {
-            try { window.location.reload() } catch (_) {}
-          }, 1000)
-        }
-      } catch (_) {}
     } catch (err: unknown) {
       // If network/offline error, queue checkout for later (offline support)
       const msg = err instanceof Error ? err.message : String(err)
@@ -549,7 +548,6 @@ export default function POSPage() {
               })() : null}
 
             <div className="mt-3 flex justify-end gap-2">
-              <Button onClick={() => { setReceipt(null) }}>Close</Button>
             </div>
           </Card>
         </div>
@@ -747,15 +745,7 @@ export default function POSPage() {
 
               <div className="flex gap-2 justify-end">
               <Button onClick={() => { setShowPaymentModal(false) }}>Cancel</Button>
-              <Button onClick={async () => {
-                  try {
-                    await performCheckout(Number(paymentAmount || 0))
-                    // wait 2s then reload to pick up updates
-                    try { if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000) } catch (_) {}
-                  } catch (e) {
-                    // performCheckout handles errors; no-op here
-                  }
-                }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
+              <Button onClick={async () => { try { await performCheckout(Number(paymentAmount || 0)) } catch (e) { /* noop */ } }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
             </div>
           </Card>
         </div>
