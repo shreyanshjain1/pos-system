@@ -25,7 +25,7 @@ function openDB(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, 1)
     req.onupgradeneeded = () => {
       const db = req.result
-      if (!db.objectStoreNames.contains(OUTBOX_STORE)) db.createObjectStore(OUTBOX_STORE, { keyPath: 'id' })
+      if (!db.objectStoreNames.contains(OUTBOX_STORE)) db.createObjectStore(OUTBOX_STORE, { keyPath: 'queueId' })
       if (!db.objectStoreNames.contains(PRODUCTS_STORE)) db.createObjectStore(PRODUCTS_STORE, { keyPath: 'id' })
       if (!db.objectStoreNames.contains(BARCODES_STORE)) db.createObjectStore(BARCODES_STORE, { keyPath: 'code' })
     }
