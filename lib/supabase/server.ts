@@ -7,7 +7,7 @@ export function getSupabaseAdmin(): SupabaseClient {
 
   // Test override: if running tests with TEST_SUPABASE_MOCK=1, return a mock implementation
   if (process.env.TEST_SUPABASE_MOCK === '1') {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const mock = require('../../tests/mockSupabase').getMockSupabase()
     return mock as unknown as SupabaseClient
   }

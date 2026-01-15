@@ -51,7 +51,7 @@ export default function ProductsPage() {
     const channel = client
       .channel('public:products')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
-        fetchList()
+        fetchList({ skipLoading: true })
       })
       .subscribe()
 
@@ -77,10 +77,25 @@ export default function ProductsPage() {
     }
     window.addEventListener('pos:settings:updated', onSettingsUpdate)
 
+    // Listen for cross-tab broadcasts (checkout/create from other tabs/devices)
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('pos-updates')
+        bc.onmessage = () => fetchList({ skipLoading: true })
+        ;(window as any)._products_bc = bc
+      }
+    } catch (_) {}
+    const storageListener = (e: StorageEvent) => {
+      if (e.key === 'pos:data-updated') fetchList({ skipLoading: true })
+    }
+    try { window.addEventListener('storage', storageListener) } catch (_) {}
+
     return () => {
       try { channel.unsubscribe() } catch (_) {}
+      try { (window as any)._products_bc?.close?.() } catch (_) {}
       try { window.removeEventListener('pos:settings:updated', onSettingsUpdate) } catch (_) {}
       try { window.removeEventListener('resize', checkMobile) } catch (_) {}
+      try { window.removeEventListener('storage', storageListener) } catch (_) {}
     }
   }, [])
 
@@ -94,8 +109,9 @@ export default function ProductsPage() {
     }
   }, [showScannerCreate, showScannerEdit, scannerMode])
 
-  async function fetchList() {
-    setLoading(true)
+  async function fetchList(opts?: { skipLoading?: boolean }) {
+    const skipLoading = opts?.skipLoading === true
+    if (!skipLoading) setLoading(true)
     try {
       const res = await fetchWithAuth('/api/products')
       const json: unknown = await res.json()
@@ -109,7 +125,7 @@ export default function ProductsPage() {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Failed to load')
     } finally {
-      setLoading(false)
+      if (!skipLoading) setLoading(false)
     }
   }
 

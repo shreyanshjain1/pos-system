@@ -9,6 +9,7 @@ import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import fetchWithAuth from '@/lib/fetchWithAuth'
 import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, broadcastDataUpdate } from '@/lib/offlineQueue'
+import OutboxModal from '@/components/pos/OutboxModal'
 import { getOrCreateDeviceId } from '@/lib/devices'
 import BarcodeScanListener from '@/components/scan/BarcodeScanListener'
 import ThermalReceipt from '@/components/print/ThermalReceipt'
@@ -49,6 +50,7 @@ export default function POSPage() {
   const realtimeDebounceRef = useRef<number | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [showCartModal, setShowCartModal] = useState(false)
+  const [showOutboxModal, setShowOutboxModal] = useState(false)
 
   useEffect(() => {
     // initial load
@@ -81,16 +83,53 @@ export default function POSPage() {
         }
       } catch (_) {}
     }
-    window.addEventListener('pos:settings:updated', onSettingsUpdate)
+    try { (window as any).addEventListener('pos:settings:updated', onSettingsUpdate) } catch (_) {}
 
-    // Realtime disabled temporarily to avoid overloading hosting (Vercel).
-    // Products will be fetched on load and after checkouts; re-enable realtime when ready.
-    setRealtimeStatus('idle')
+    // Attempt to enable Supabase realtime for products. If realtime fails
+    // fall back to lightweight polling. Debounce rapid events to avoid
+    // excessive product fetches.
+    (async () => {
+      try {
+        setRealtimeStatus('connecting')
+        const channel = (supabase as any).channel?.('products:client')
+          ?.on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload: any) => {
+            setLastRealtimeAt(Date.now())
+            setRealtimeStatus('connected')
+            pendingRealtimeRef.current.push(payload)
+            try { if (realtimeDebounceRef.current) window.clearTimeout(realtimeDebounceRef.current) } catch (_) {}
+            realtimeDebounceRef.current = window.setTimeout(() => {
+              // clear queue and refresh products
+              pendingRealtimeRef.current = []
+              fetchProducts({ skipLoading: true })
+            }, 250)
+          })
+          ?.subscribe()
+
+        // If channel subscription didn't exist, mark as polling
+        if (!channel) throw new Error('Realtime channel unavailable')
+
+        // store channel on ref for cleanup
+        ;(pollTimerRef as any).channel = channel
+      } catch (e) {
+        // Realtime unavailable — enable polling every 8s
+        setRealtimeStatus('polling')
+        try { if (pollTimerRef.current) window.clearInterval(pollTimerRef.current) } catch (_) {}
+        pollTimerRef.current = window.setInterval(() => fetchProducts({ skipLoading: true }), 8000) as unknown as number
+      }
+    })()
 
     return () => {
       try { if (inspectTimerRef.current) window.clearInterval(inspectTimerRef.current) } catch (_) {}
+      try {
+        // cleanup realtime channel if created
+        const ch = (pollTimerRef as any).channel
+        if (ch) {
+          try { ch.unsubscribe?.() } catch (_) {}
+          try { ;(supabase as any).removeChannel?.(ch) } catch (_) {}
+        }
+      } catch (_) {}
       try { if (pollTimerRef.current) window.clearInterval(pollTimerRef.current) } catch (_) {}
-      try { window.removeEventListener('pos:settings:updated', () => {}) } catch (_) {}
+      try { (window as any).removeEventListener('pos:settings:updated', onSettingsUpdate) } catch (_) {}
       try { window.removeEventListener('resize', checkMobile) } catch (_) {}
       try { if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel('pos-updates')
@@ -249,6 +288,7 @@ export default function POSPage() {
     const total = computeTotal()
     const change = Number((payment - total).toFixed(2))
     const payload: Record<string, unknown> = { items, total, payment_method: 'cash', payment, change }
+
     try {
       // include auth token and device id so backend assigns correct shop and validates ownership
       const _did = await getOrCreateDeviceId()
@@ -258,10 +298,12 @@ export default function POSPage() {
         const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
         throw new Error((errMsg as string) || 'Checkout failed')
       }
+
       // success: clear cart and refresh products
       setCart([])
       fetchProducts()
       try { broadcastDataUpdate() } catch (_) {}
+
       // attach payment and change to receipt for display if backend doesn't include them
       const receiptData: unknown = typeof json === 'object' && json !== null ? ((json as Record<string, unknown>)['data'] ?? json) : json
       if (receiptData && typeof receiptData === 'object') {
@@ -275,9 +317,35 @@ export default function POSPage() {
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
     } catch (err: unknown) {
-      // Offline feature temporarily removed — surface error to user
+      // If network/offline error, queue checkout for later (offline support)
       const msg = err instanceof Error ? err.message : String(err)
-      setError(msg || 'Checkout failed')
+      const isNavigatorOffline = typeof navigator !== 'undefined' && (navigator as any).onLine === false
+      const looksLikeNetworkError = typeof msg === 'string' && (
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('networkerror') ||
+        msg.toLowerCase().includes('network error') ||
+        msg.toLowerCase().includes('network request failed') ||
+        (msg.toLowerCase().includes('request to') && msg.toLowerCase().includes('failed'))
+      )
+      const isNetworkError = isNavigatorOffline || err instanceof TypeError || looksLikeNetworkError
+
+      if (isNetworkError) {
+        try {
+          const deviceId = (await getOrCreateDeviceId()) ?? undefined
+          await addOutboxItem('checkout', { items, total, payment_method: 'cash', payment, change }, { deviceId })
+          // clear cart and show queued receipt
+          setCart([])
+          setReceipt({ queued: true, items, total, payment, change, queuedAt: Date.now() })
+          setShowPaymentModal(false)
+          setError('Offline: checkout queued and will sync when online')
+          try { broadcastDataUpdate() } catch (_) {}
+        } catch (qerr) {
+          const qmsg = qerr instanceof Error ? qerr.message : String(qerr)
+          setError(qmsg || 'Checkout failed and could not be queued')
+        }
+      } else {
+        setError(msg || 'Checkout failed')
+      }
     } finally {
       setCheckingOut(false)
     }
@@ -291,14 +359,18 @@ export default function POSPage() {
       transition={{ duration: 0.28 }}
       className="min-h-screen bg-gray-50/60 p-6"
     >
-      <div className="max-w-7xl mx-auto">
       {/* Realtime diagnostics */}
       <div className="flex justify-end mb-2">
         <div className="text-sm text-gray-600">
           Realtime: <strong className={`${realtimeStatus === 'connected' ? 'text-emerald-600' : realtimeStatus === 'polling' ? 'text-amber-600' : realtimeStatus === 'error' ? 'text-red-600' : 'text-gray-700'}`}>{realtimeStatus}</strong>
           {lastRealtimeAt ? <span className="ml-2">Last: {new Date(lastRealtimeAt).toLocaleTimeString()}</span> : null}
         </div>
+        <div className="ml-4">
+          <Button onClick={() => setShowOutboxModal(true)} className="ml-2">Outbox</Button>
+        </div>
       </div>
+      
+      <div className="max-w-7xl mx-auto">
 
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -322,6 +394,7 @@ export default function POSPage() {
           <Button onClick={() => setShowScanner(true)} className="ml-2">Scan</Button>
         </div>
       </div>
+      <OutboxModal open={showOutboxModal} onClose={() => setShowOutboxModal(false)} />
       
 
       <div className="grid gap-6 grid-cols-1 md:grid-cols-[1fr_380px]">

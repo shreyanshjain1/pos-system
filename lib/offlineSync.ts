@@ -43,7 +43,7 @@ export async function flushOnce() {
 
       // map known action types to endpoints
       let endpoint = ''
-      let method: 'POST' | 'PUT' | 'DELETE' = 'POST'
+      const method: 'POST' | 'PUT' | 'DELETE' = 'POST'
       let body: any = it.payload
 
       switch (it.actionType) {
