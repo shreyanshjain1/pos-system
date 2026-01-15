@@ -12,9 +12,9 @@ export async function GET(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const userId = (authData as any)?.user?.id
+    const userId = (authData as unknown as { user?: { id?: string } })?.user?.id
     if (!userId) return NextResponse.json({ data: [] })
 
     // Fetch shops mapped to this user
@@ -26,14 +26,19 @@ export async function GET(req: Request) {
 
     if (error) throw error
 
-    const shops = (data || []).map((r: any) => ({ id: r.shop_id || r.shops?.id, name: r.shops?.name, role: r.role }))
+    const shops = (data || []).map((r: unknown) => {
+      const row = r as unknown as Record<string, unknown>
+      const shopsObj = row.shops as unknown as Record<string, unknown> | undefined
+      return { id: (row.shop_id as string) || (shopsObj?.id as string | undefined), name: shopsObj?.name as string | undefined, role: row.role as string | undefined }
+    })
 
     // Do NOT auto-create shops here. If the user has no mapping, return empty list
     // and let the client redirect to onboarding.
 
     return NextResponse.json({ data: shops })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('user-shops GET error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

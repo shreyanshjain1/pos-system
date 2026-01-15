@@ -18,9 +18,9 @@ export async function GET(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const callerEmail = (authData as any)?.user?.email
+    const callerEmail = (authData as unknown as { user?: { email?: string } })?.user?.email
     if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -33,19 +33,28 @@ export async function GET(req: Request) {
     }
 
     // Map user IDs to emails using the Admin API (small userbases expected)
-    const usersRes = await (supabaseAdmin.auth as any).admin.listUsers({ per_page: 500 })
+    const usersRes = await (supabaseAdmin.auth as unknown as { admin: { listUsers: (opts: { per_page: number }) => Promise<{ data?: { users?: unknown[] }; error?: unknown }> } }).admin.listUsers({ per_page: 500 })
     if (usersRes?.error) {
       console.warn('admin/devices: failed to list users for email mapping', usersRes.error)
     }
-    const users = usersRes?.data?.users || []
+    const users = (usersRes?.data as unknown as { users?: unknown[] })?.users || []
     const userMap: Record<string, string | null> = {}
-    users.forEach((u: any) => { userMap[u.id] = u.email || null })
+    users.forEach((u: unknown) => {
+      const uu = u as unknown as Record<string, unknown>
+      const id = uu?.id as string | undefined
+      const email = uu?.email as string | undefined
+      if (id) userMap[id] = email ?? null
+    })
 
-    const out = (devices || []).map((d: any) => ({ ...d, email: userMap[d.user_id] || null }))
+    const out = (devices || []).map((d: unknown) => {
+      const row = d as unknown as Record<string, unknown>
+      return { ...row, email: userMap[(row.user_id as string) || ''] || null }
+    })
 
     return NextResponse.json({ data: out })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('admin/devices GET error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

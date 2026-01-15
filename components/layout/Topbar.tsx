@@ -1,5 +1,6 @@
 "use client"
 import React, { useState, useRef, useEffect } from 'react'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase/client'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 import { useShop } from '@/components/context/ShopContext'
@@ -48,10 +49,12 @@ function MobileToggle() {
   )
 }
 
+type UserLike = { email?: string; user_metadata?: { full_name?: string } } | null
+
 function ProfileMenu() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
-  const [user, setUser] = useState<any | null>(null)
+  const [user, setUser] = useState<UserLike>(null)
   const { shopId } = useShop()
   const [shopName, setShopName] = useState<string | null>(null)
   const displayInitial = shopName ? shopName.charAt(0).toUpperCase() : (user ? ((user.email || '').charAt(0).toUpperCase()) : 'G')
@@ -62,7 +65,7 @@ function ProfileMenu() {
     async function load() {
       try {
         const { data } = await supabase.auth.getSession()
-        const session = data?.session
+        const session = (data as { session?: { user?: UserLike } } | undefined)?.session
         if (!mounted) return
         setUser(session?.user ?? null)
       } catch (e) {
@@ -83,9 +86,9 @@ function ProfileMenu() {
       try {
         const res = await fetchWithAuth(`/api/shops/${shopId}`)
         if (res.ok) {
-          const json = await res.json()
+          const json = await res.json().catch(() => ({} as Record<string, unknown>))
           if (!mounted) return
-          setShopName(json?.data?.name ?? null)
+          setShopName((json as unknown as { data?: { name?: string } })?.data?.name ?? null)
           return
         }
         // fallback: try to read from public shops table with browser client
@@ -96,13 +99,14 @@ function ProfileMenu() {
 
       // Fallback attempt: query `shops` table directly using the browser client
       try {
-        const { data: shopRow, error } = await supabase.from('shops').select('name').eq('id', shopId).maybeSingle()
+        const browserClient = supabase as unknown as SupabaseClient
+        const { data: shopRow, error } = await (browserClient.from('shops').select('name').eq('id', shopId).maybeSingle() as unknown as Promise<{ data?: { name?: string } | null; error?: unknown }>)
         if (error) {
           console.warn('ProfileMenu: fallback shops query failed', error)
           return
         }
         if (!mounted) return
-        setShopName((shopRow as any)?.name ?? null)
+        setShopName((shopRow as unknown as { name?: string })?.name ?? null)
       } catch (e) {
         console.warn('ProfileMenu: fallback shops query threw', e)
       }
@@ -151,7 +155,7 @@ function ProfileMenu() {
 
   async function handleLogout() {
     try {
-      await supabase.auth.signOut()
+      await (supabase as unknown as { auth?: { signOut?: () => Promise<unknown> } })?.auth?.signOut?.()
     } catch (e) {
       console.warn('Logout failed', e)
     }

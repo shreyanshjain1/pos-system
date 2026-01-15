@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 
 const TYPES = ['retail', 'coffee', 'food', 'building_materials', 'services']
 
-export default function ChooseTypeClient({ shop }: { shop?: any }) {
+export default function ChooseTypeClient({ shop }: { shop?: Record<string, unknown> | undefined }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -17,7 +17,8 @@ export default function ChooseTypeClient({ shop }: { shop?: any }) {
     setLoading(true)
     try {
       const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = (sessionData as any)?.session?.access_token ?? null
+      const sessionObj = sessionData as unknown as { session?: { access_token?: string } } | undefined
+      const accessToken = sessionObj?.session?.access_token ?? null
       if (!accessToken) {
         setError('Not authenticated')
         router.push('/login')
@@ -29,13 +30,20 @@ export default function ChooseTypeClient({ shop }: { shop?: any }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ pos_type: selected })
       })
-      const payload = await resp.json()
-      if (!resp.ok) throw new Error(payload?.error || 'Failed')
-      const shop = payload?.shop
-      if (!shop) throw new Error('No shop returned')
-      router.push(`/${shop.plan}/${shop.pos_type}/dashboard`)
-    } catch (e: any) {
-      setError(e?.message || String(e))
+      const payload: unknown = await resp.json()
+      if (!resp.ok) {
+        const errMsg = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Failed')
+      }
+      const payloadObj = typeof payload === 'object' && payload !== null ? (payload as Record<string, unknown>) : {}
+      const shopObj = payloadObj['shop'] as Record<string, unknown> | undefined
+      if (!shopObj) throw new Error('No shop returned')
+      const plan = shopObj['plan'] as string | undefined
+      const posType = shopObj['pos_type'] as string | undefined
+      router.push(`/${plan}/${posType}/dashboard`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg || String(e))
     } finally { setLoading(false) }
   }
 

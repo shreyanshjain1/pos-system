@@ -18,21 +18,21 @@ export async function GET(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const callerEmail = (authData as any)?.user?.email
+    const callerEmail = (authData as unknown as { user?: { email?: string } })?.user?.email
     if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // List users via admin API
-    const usersRes = await (supabaseAdmin.auth as any).admin.listUsers({ per_page: 100 })
+    const usersRes = await (supabaseAdmin.auth as unknown as { admin: { listUsers: (opts: { per_page: number }) => Promise<{ data?: { users?: unknown[] }; error?: unknown }> } }).admin.listUsers({ per_page: 100 })
     if (usersRes?.error) throw usersRes.error
-    const users = (usersRes?.data?.users || []) as any[]
+    const users = (usersRes?.data as unknown as { users?: unknown[] })?.users || []
 
     // Try to fetch subscription records if table exists
-    const userIds = users.map((u) => u.id)
-    let subsMap: Record<string, any> = {}
+    const userIds = (users as unknown[]).map((u: unknown) => (u as unknown as { id?: string })?.id).filter(Boolean) as string[]
+    const subsMap: Record<string, unknown> = {}
     try {
       const { data: subs, error: subsErr } = await supabaseAdmin
         .from('user_subscriptions')
@@ -40,27 +40,35 @@ export async function GET(req: Request) {
         .in('user_id', userIds)
 
       if (!subsErr && Array.isArray(subs)) {
-        subs.forEach((s: any) => {
-          subsMap[s.user_id] = s
+        subs.forEach((s: unknown) => {
+          const ss = s as unknown as Record<string, unknown>
+          const uid = ss?.user_id as string | undefined
+          if (uid) subsMap[uid] = ss
         })
       }
     } catch (e) {
       // ignore if table doesn't exist
     }
-
-    const out = users.map((u) => ({
-      id: u.id,
-      email: u.email,
-      created_at: u.created_at,
-      phone: u.phone,
-      app_meta: u.user_metadata || u.raw_user_meta_data || null,
-      plan: subsMap[u.id]?.plan || null,
-      expiry_date: subsMap[u.id]?.expiry_date || null
-    }))
+    const out = (users as unknown[]).map((u: unknown) => {
+      const uu = u as unknown as Record<string, unknown>
+      const id = uu?.id as string | undefined
+      const app_meta = (uu?.user_metadata ?? uu?.raw_user_meta_data) ?? null
+      const subs = id ? (subsMap[id] as unknown as Record<string, unknown> | undefined) : undefined
+      return {
+        id,
+        email: uu?.email as string | undefined,
+        created_at: uu?.created_at as string | undefined,
+        phone: uu?.phone as string | undefined,
+        app_meta,
+        plan: subs?.plan ?? null,
+        expiry_date: subs?.expiry_date ?? null,
+      }
+    })
 
     return NextResponse.json({ data: out })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('admin/users GET error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

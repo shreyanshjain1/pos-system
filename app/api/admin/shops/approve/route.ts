@@ -18,24 +18,25 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const callerEmail = (authData as any)?.user?.email
-    const callerId = (authData as any)?.user?.id
+    const callerEmail = (authData as unknown as { user?: { email?: string } })?.user?.email
+    const callerId = (authData as unknown as { user?: { id?: string } })?.user?.id
     if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const body = await req.json().catch(() => ({}))
-    const shopId = body?.id
+    const body: unknown = await req.json().catch(() => ({} as unknown))
+    const shopId = (body as unknown as Record<string, unknown>)?.id
     if (!shopId) return NextResponse.json({ error: 'Missing shop id' }, { status: 400 })
 
     const { error: updErr } = await supabaseAdmin.from('shops').update({ bir_disclaimer_approved_at: new Date().toISOString(), bir_disclaimer_approved_by: callerId }).eq('id', shopId)
     if (updErr) throw updErr
 
     return NextResponse.json({ ok: true })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('admin/shops/approve POST error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

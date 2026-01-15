@@ -7,6 +7,12 @@ import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 
 export default function LoginPage() {
+	const [email, setEmail] = useState('')
+	const [password, setPassword] = useState('')
+	const [loading, setLoading] = useState(false)
+	const [error, setError] = useState<string | null>(null)
+	const [remember, setRemember] = useState(false)
+	const router = useRouter()
 	if (!isSupabaseConfigured) {
 		return (
 			<main className="min-h-screen flex items-center justify-center py-12">
@@ -19,12 +25,6 @@ export default function LoginPage() {
 			</main>
 		)
 	}
-	const [email, setEmail] = useState('')
-	const [password, setPassword] = useState('')
-	const [loading, setLoading] = useState(false)
-	const [error, setError] = useState<string | null>(null)
-	const [remember, setRemember] = useState(false)
-	const router = useRouter()
 
 	async function handleLogin(e?: React.FormEvent) {
 		e?.preventDefault()
@@ -34,13 +34,24 @@ export default function LoginPage() {
 			// signIn with a timeout to avoid UI hanging if network or upstream is unresponsive
 			const signInPromise = supabase.auth.signInWithPassword({ email, password })
 			const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Sign in request timed out. Check your network.')), 15000))
-			const result = await Promise.race([signInPromise, timeout]) as any
+			const result = await Promise.race([signInPromise, timeout]) as unknown
 			// sign-in result received
-			const { data, error } = result || {}
-			if (error) throw error
+			const data = (result as { data?: unknown })?.data
+			const errorObj = (result as { error?: unknown })?.error
+			if (errorObj) throw errorObj as Error
 
-			const accessToken = (data as any)?.session?.access_token
+			const accessToken = (data as unknown as { session?: { access_token?: string } })?.session?.access_token
 			if (accessToken) {
+				// Persist session for server-side guards: tell server to set an HttpOnly cookie
+				try {
+					await fetch('/api/auth/set-session', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ accessToken })
+					})
+				} catch (e) {
+					// non-fatal
+				}
 					// register this client device with the server (non-blocking if it fails)
 					try {
 						await registerDeviceWithServer(accessToken)
@@ -48,16 +59,16 @@ export default function LoginPage() {
 						// non-fatal device registration failure
 					}
 
-				let shops: any[] = []
+				let shops: Record<string, unknown>[] = []
 				try {
 					const resp = await fetch('/api/user-shops', {
 						headers: { Authorization: `Bearer ${accessToken}` }
 					})
 					if (resp.ok) {
 						const payload = await resp.json()
-						shops = payload?.data || []
+						shops = (payload?.data as unknown as Record<string, unknown>[]) || []
 						if (shops.length > 0) {
-							try { localStorage.setItem('pos:active-shop', shops[0].id) } catch (e) {}
+							try { localStorage.setItem('pos:active-shop', (shops[0]?.id as string | undefined) ?? '') } catch (e) {}
 						} else {
 							try { localStorage.removeItem('pos:active-shop') } catch (_) {}
 							// no shop -> onboarding
@@ -69,32 +80,35 @@ export default function LoginPage() {
 					// failed to fetch user shops
 				}
 
-				// If user has shops, check BIR acceptance for the active shop
+								// If user has shops, try auto-claiming the device for the active shop if needed
+								try {
+									const activeShopId = (shops[0]?.id as string | undefined) ?? ''
+									if (activeShopId) {
+										try {
+											const myDevice = await (await import('@/lib/devices')).getOrCreateDeviceId()
+											if (myDevice) {
+												await fetch('/api/shops/auto-claim', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ shop_id: activeShopId, device_id: myDevice }) }).catch(() => {})
+											}
+										} catch (e) {}
+									}
+								} catch (e) {}
+
+								// If user has shops, check BIR acceptance for the active shop
 				if (shops.length > 0) {
-					try {
-						const check = await fetch('/api/check-bir', { headers: { Authorization: `Bearer ${accessToken}` } })
-						if (check.ok) {
-							const j = await check.json()
-							// require both user acceptance and admin approval to go to dashboard
-							if (j.accepted && j.approved) {
-								router.push('/dashboard')
-								return
-							} else {
-								router.push('/onboarding/bir-accept')
-								return
-							}
-						}
-					} catch (e) {
-						// failed to check BIR acceptance
-					}
+					// Returning user: go straight to dashboard
+					try { localStorage.setItem('pos:active-shop', (shops[0]?.id as string | undefined) ?? '') } catch (e) {}
+					router.push('/dashboard')
+					return
 				}
 
 			}
 
-			router.push('/pos')
-		} catch (err: any) {
-				setError(err.message || String(err))
-				console.error('Sign-in error:', err)
+			// If no shops found, send to onboard (handled earlier), otherwise default to dashboard
+			router.push('/dashboard')
+		} catch (err: unknown) {
+								const msg = typeof err === 'object' && err !== null && 'message' in err ? String((err as { message?: string }).message) : String(err)
+								setError(msg)
+								console.error('Sign-in error:', err)
 		} finally {
 			setLoading(false)
 		}
@@ -164,9 +178,11 @@ export default function LoginPage() {
 									<Button type="submit" className="w-full h-14 text-base rounded-lg" disabled={loading}>{loading ? 'Signing in…' : 'Sign In'}</Button>
 								</div>
 
+
+
 								{/* debug buttons removed */}
 
-								<p className="text-center text-sm text-slate-600">Don't have an account? <button type="button" className="text-indigo-600 font-medium" onClick={() => router.push('/signup')}>Sign up</button></p>
+								<p className="text-center text-sm text-slate-600">Don&apos;t have an account? <button type="button" className="text-indigo-600 font-medium" onClick={() => router.push('/signup')}>Sign up</button></p>
 							</form>
 						</div>
 					</div>

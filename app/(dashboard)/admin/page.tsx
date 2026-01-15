@@ -19,7 +19,7 @@ export default function AdminPage() {
     ;(async () => {
       try {
         const { data } = await supabase.auth.getSession()
-        const session = (data as any)?.session
+        const session = (data as unknown as { session?: { user?: { email?: string } } })?.session
         const email = session?.user?.email ?? null
         if (!mounted) return
         setIsOwner(isOwnerEmail(email))

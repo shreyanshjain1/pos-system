@@ -1,9 +1,9 @@
 "use client"
-"use client"
-import React from 'react'
-import { motion } from 'framer-motion'
 
-export function Card({ children, className = '', ...rest }: React.HTMLAttributes<HTMLDivElement>) {
+import React from 'react'
+import { motion, HTMLMotionProps } from 'framer-motion'
+
+export function Card({ children, className = '', ...rest }: Omit<HTMLMotionProps<'div'>, 'ref'> & { className?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}

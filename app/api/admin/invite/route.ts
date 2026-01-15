@@ -18,28 +18,30 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const callerEmail = (authData as any)?.user?.email
+    const callerEmail = (authData as unknown as { user?: { email?: string } })?.user?.email
     if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const body = await req.json().catch(() => ({}))
-    const email = body?.email
-    const redirectTo = body?.redirectTo
+    const body: unknown = await req.json().catch(() => ({} as unknown))
+    const bodyRec = body as unknown as Record<string, unknown>
+    const email = bodyRec?.email as string | undefined
+    const redirectTo = bodyRec?.redirectTo as string | undefined
     if (!email) return NextResponse.json({ error: 'Missing email' }, { status: 400 })
 
     // Send invite via admin API
-    const inviteRes = await (supabaseAdmin.auth as any).admin.inviteUserByEmail(email, { redirectTo })
+    const inviteRes = await (supabaseAdmin.auth as unknown as { admin: { inviteUserByEmail: (e: string, opts?: { redirectTo?: string }) => Promise<{ data?: unknown; error?: unknown }> } }).admin.inviteUserByEmail(email, { redirectTo })
     if (inviteRes?.error) {
       console.error('invite error', inviteRes.error)
-      return NextResponse.json({ error: inviteRes.error.message || 'Invite failed' }, { status: 500 })
+      return NextResponse.json({ error: (inviteRes.error as unknown as { message?: string })?.message || 'Invite failed' }, { status: 500 })
     }
 
     return NextResponse.json({ data: inviteRes.data })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('admin/invite POST error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

@@ -18,17 +18,18 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const callerEmail = (authData as any)?.user?.email
+    const callerEmail = (authData as unknown as { user?: { email?: string } })?.user?.email
     if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const body = await req.json().catch(() => ({}))
-    const id = body?.id ?? null
-    const user_id = body?.user_id ?? null
-    const device_id = body?.device_id ?? null
+    const body: unknown = await req.json().catch(() => ({} as unknown))
+    const bodyRec = body as unknown as Record<string, unknown>
+    const id = bodyRec?.id ?? null
+    const user_id = bodyRec?.user_id ?? null
+    const device_id = bodyRec?.device_id ?? null
 
     if (!id && !(user_id && device_id)) {
       return NextResponse.json({ error: 'Missing identifier' }, { status: 400 })
@@ -43,9 +44,22 @@ export async function POST(req: Request) {
 
     if (updRes.error) throw updRes.error
 
+    // Audit the unrevoke action (best-effort)
+    try {
+      const affected = (updRes.data && Array.isArray(updRes.data) && (updRes.data as unknown[]).length) ? (updRes.data as unknown[])[0] : null
+      const targetDeviceId = device_id ?? ((affected as unknown as Record<string, unknown>)?.device_id ?? null)
+      const targetUserId = id ? (affected as unknown as Record<string, unknown>)?.user_id : user_id
+      const callerId = (authData as any)?.user?.id ?? null
+      const { auditDeviceEvent } = await import('@/lib/deviceAuth')
+      await auditDeviceEvent(supabaseAdmin, { accountId: null, userId: callerId, role: 'owner', oldDeviceId: null, newDeviceId: targetDeviceId, action: 'unrevoke_device', timestamp: new Date().toISOString(), ip: req.headers.get('x-forwarded-for') ?? null, userAgent: req.headers.get('user-agent') ?? null, target_user_id: targetUserId })
+    } catch (e) {
+      // ignore audit failures
+    }
+
     return NextResponse.json({ data: updRes.data })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('admin/devices/unrevoke POST error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

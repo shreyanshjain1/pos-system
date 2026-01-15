@@ -72,7 +72,7 @@ export async function POST(req: Request) {
 
     const { data: mapData, error: mapErr } = await supabaseAdmin
       .from('user_shops')
-      .insert({ user_id: userId, shop_id: (shopData as any).id, role: 'owner' })
+      .insert({ user_id: userId, shop_id: (shopData as unknown as { id?: string })?.id, role: 'owner' })
       .select('*')
       .single()
 
@@ -82,9 +82,10 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true, shop: shopData })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Supabase webhook handler error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 

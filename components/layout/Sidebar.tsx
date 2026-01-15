@@ -51,7 +51,6 @@ const NAV: NavItem[] = [
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
-  const [hovered, setHovered] = useState('')
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const { mobileOpen, setMobileOpen } = useSidebar()
 
@@ -64,11 +63,13 @@ export default function Sidebar() {
     let mounted = true
     ;(async () => {
       try {
-        const { data } = await import('@/lib/supabase/client').then(m => m.supabase.auth.getSession())
-        const session = (data as any)?.session
+        const m = await import('@/lib/supabase/client')
+        const res = await m.supabase.auth.getSession()
+        const sessObj = res as unknown as { data?: { session?: { user?: { email?: string } } } }
+        const session = sessObj.data?.session
         if (!mounted) return
         setUserEmail(session?.user?.email ?? null)
-      } catch (e) {
+      } catch (_) {
         // ignore
       }
     })()
@@ -79,8 +80,8 @@ export default function Sidebar() {
     localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0')
   }, [collapsed])
 
-  return (
-    <aside className={`flex-shrink-0 h-screen bg-white border-r border-gray-100 ${collapsed ? 'w-20' : 'w-72'} hidden md:flex flex-col`}>
+  const navContent = (
+    <>
       <div className="px-4 py-5 flex items-center justify-between">
         <div onClick={() => setCollapsed(v => !v)} className="flex items-center gap-3 cursor-pointer">
           <div className="w-10 h-10 bg-indigo-600 text-white rounded-md flex items-center justify-center font-bold">R</div>
@@ -102,8 +103,6 @@ export default function Sidebar() {
                 className={`flex items-center gap-3 w-full text-sm text-slate-700 hover:bg-gray-50 rounded-md px-3 py-2 ${collapsed ? 'justify-center' : ''}`}
                 aria-label={item.label}
                 title={item.label}
-                onMouseEnter={() => setHovered(item.href)}
-                onMouseLeave={() => setHovered('')}
               >
                 <span className="w-5 h-5 text-slate-600">{item.icon}</span>
                 {!collapsed && <span className="truncate">{item.label}</span>}
@@ -121,6 +120,25 @@ export default function Sidebar() {
           )}
         </ul>
       </nav>
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
+          <aside className="relative h-full bg-white w-64 shadow-xl">
+            {navContent}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside className={`flex-shrink-0 h-screen bg-white border-r border-gray-100 ${collapsed ? 'w-20' : 'w-72'} hidden md:flex flex-col`}>
+        {navContent}
+      </aside>
+    </>
   )
 }

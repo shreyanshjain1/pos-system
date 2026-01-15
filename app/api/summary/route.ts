@@ -20,11 +20,11 @@ export async function GET(req: Request) {
     const accessToken = authHeader.split(' ')[1]
     let shopIds: string[] = []
     try {
-      const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
-      if (authErr || !authData?.user?.id) return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-      const userId = authData.user.id
+      const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
+      if (authErr || !(authData as unknown as { user?: { id?: string } })?.user?.id) return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
+      const userId = (authData as unknown as { user?: { id?: string } })?.user?.id as string
       const { data: mappings } = await supabaseAdmin.from('user_shops').select('shop_id').eq('user_id', userId)
-      shopIds = (mappings || []).map((m: any) => m.shop_id).filter(Boolean)
+      shopIds = (mappings || []).map((m: unknown) => (m as unknown as { shop_id?: string })?.shop_id).filter(Boolean) as string[]
     } catch (e) {
       console.warn('Summary: token validation failed', e)
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
@@ -38,7 +38,7 @@ export async function GET(req: Request) {
     if (salesError) throw salesError
 
     const todaysSales = Array.isArray(salesRows)
-      ? salesRows.reduce((s: number, r: any) => s + Number(r.total || 0), 0)
+      ? salesRows.reduce((s: number, r: unknown) => s + Number((r as unknown as { total?: unknown })?.total || 0), 0)
       : 0
 
     // Total products count
@@ -58,8 +58,9 @@ export async function GET(req: Request) {
     const lowStock = Array.isArray(lowRows) ? lowRows.length : 0
 
     return NextResponse.json({ todaysSales, totalProducts, lowStock })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Summary API error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

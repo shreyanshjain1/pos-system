@@ -22,7 +22,7 @@ const MOCK_SALES = [
 export default function DemoPOS() {
   const [products] = useState<Product[]>(MOCK_PRODUCTS)
   const [cart, setCart] = useState<CartItem[]>([])
-  const [receipt, setReceipt] = useState<any | null>(null)
+  const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null)
 
   function addToCart(p: Product) {
     setCart(prev => {
@@ -124,7 +124,10 @@ export default function DemoPOS() {
                       <div className="font-medium">{new Date(s.created_at).toLocaleString()}</div>
                       <div className="font-semibold">{formatCurrency(s.total)}</div>
                     </div>
-                    <div className="text-sm text-slate-500 mt-1">{s.items.map((it: any) => `${it.name} ×${it.qty}`).join(', ')}</div>
+                    <div className="text-sm text-slate-500 mt-1">{s.items.map((it: unknown) => {
+                      const row = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
+                      return `${(row['name'] as string ?? '')} ×${Number(row['qty'] ?? 0)}`
+                    }).join(', ')}</div>
                   </div>
                 ))}
               </div>
@@ -138,19 +141,25 @@ export default function DemoPOS() {
               <Card>
                 <h3 className="text-lg font-semibold mb-3">Demo Receipt</h3>
                 <div>
-                  <div className="font-semibold mb-2">Sale ID: {receipt.id}</div>
-                  <div className="mb-2 text-sm text-slate-500">{new Date(receipt.created_at).toLocaleString()}</div>
+                  <div className="font-semibold mb-2">Sale ID: {String((receipt as Record<string, unknown>)['id'] ?? '')}</div>
+                  <div className="mb-2 text-sm text-slate-500">{new Date(String((receipt as Record<string, unknown>)['created_at'] ?? '')).toLocaleString()}</div>
                   <div className="border-t pt-2">
-                    {receipt.items.map((it: any, idx: number) => (
-                      <div key={idx} className="flex justify-between py-1">
-                        <div>{it.name} ×{it.qty}</div>
-                        <div>{formatCurrency(it.price * it.qty)}</div>
-                      </div>
-                    ))}
+                    {((((receipt as Record<string, unknown>)['items']) as unknown[]) || []).map((it: unknown, idx: number) => {
+                      const row = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
+                      const name = (row['name'] as string) ?? ''
+                      const qty = Number(row['qty'] ?? 0)
+                      const price = Number(row['price'] ?? 0)
+                      return (
+                        <div key={idx} className="flex justify-between py-1">
+                          <div>{name} ×{qty}</div>
+                          <div>{formatCurrency(price * qty)}</div>
+                        </div>
+                      )
+                    })}
                   </div>
-                  <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
+                    <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
                     <div>Total</div>
-                    <div>{formatCurrency(receipt.total)}</div>
+                    <div>{formatCurrency(Number((receipt as Record<string, unknown>)['total'] ?? 0))}</div>
                   </div>
                 </div>
 

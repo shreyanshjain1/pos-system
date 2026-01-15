@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 
+type SupabaseAuthLike = { getUser: (token: string) => Promise<{ data?: unknown; error?: unknown }> }
+type SupabaseUserData = { user?: { id?: string } }
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { items, total, payment_method } = body
+    const body: unknown = await req.json()
+    if (typeof body !== 'object' || body === null) return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
+    const { items, total, payment_method } = body as Record<string, unknown>
+    const bodyRec = body as Record<string, unknown>
     if (!items || !Array.isArray(items)) return NextResponse.json({ error: 'Invalid items' }, { status: 400 })
 
     const supabase = getSupabaseAdmin()
@@ -16,22 +21,44 @@ export async function POST(req: Request) {
     if (authHeader.startsWith('Bearer ')) {
       const accessToken = authHeader.split(' ')[1]
       try {
-        const { data: authData, error: authErr } = await (supabase.auth as any).getUser(accessToken)
-        if (!authErr && authData?.user?.id) {
-          userId = authData.user.id
+        const { data: authData, error: authErr } = await (supabase.auth as unknown as SupabaseAuthLike).getUser(accessToken)
+        const maybeUserId = (authData as unknown as SupabaseUserData)?.user?.id
+        if (!authErr && maybeUserId) {
+          userId = maybeUserId
           const { data: mappings } = await supabase.from('user_shops').select('shop_id').eq('user_id', userId).limit(1)
-          if (mappings && mappings.length > 0) shopId = mappings[0].shop_id
+          if (mappings && mappings.length > 0) shopId = (mappings as unknown as Array<{ shop_id?: string }>)[0].shop_id ?? null
         }
       } catch (e) {
         console.warn('Checkout: token validation failed', e)
       }
     }
-    // NOTE: main-POS / device-level enforcement removed — allow checkouts without requiring a
-    // configured main POS device. Device headers may still be present but are not required.
     // Require a shop mapping for checkout
     if (!shopId) return NextResponse.json({ error: 'No shop mapping' }, { status: 403 })
 
-    // main-POS checks removed — proceed with checkout creation for the mapped shop
+    // Enforce device authorization for checkout writes. Client must provide device id via `x-device-id` header or `deviceId` in body.
+    const deviceIdFromHeader = req.headers.get('x-device-id') || null
+    const deviceIdFromBody = (body as Record<string, unknown>)?.deviceId as string | undefined
+    const deviceId = deviceIdFromBody ?? deviceIdFromHeader
+
+    // prepare RPC payload early so we can conditionally add device id after device check
+    const rpcPayload: Record<string, unknown> = {
+      p_total: total,
+      p_payment_method: payment_method || 'unknown',
+      p_items: items,
+      p_user_id: userId,
+      p_shop_id: shopId,
+    }
+
+    try {
+      const { enforceDeviceWritePermission } = await import('@/lib/deviceAuth')
+      const userIdForCheck = userId
+      const check = await enforceDeviceWritePermission(supabase, shopId!, userIdForCheck, deviceId ?? null)
+      if (!check.allowed) return NextResponse.json({ error: check.reason || 'forbidden' }, { status: 403 })
+      // pass device_id to RPC for audit/storage
+      if (deviceId) rpcPayload.p_device_id = deviceId
+    } catch (e) {
+      return NextResponse.json({ error: 'authorization_error' }, { status: 403 })
+    }
 
     // Subscription check: require active subscription for user
     try {
@@ -46,7 +73,7 @@ export async function POST(req: Request) {
     }
 
     // idempotency: if client provided a client_sale_id, return existing sale if present
-    const client_sale_id = body?.client_sale_id ?? null
+    const client_sale_id = bodyRec?.client_sale_id ?? null
     if (client_sale_id) {
       try {
         const { data: existing } = await supabase.from('sales').select('id,sale_id,device_id,total,created_at').eq('sale_id', client_sale_id).maybeSingle()
@@ -58,15 +85,6 @@ export async function POST(req: Request) {
       } catch (e) {
         // ignore lookup errors and continue to create
       }
-    }
-
-    // send items as a JSON array (not a string) so the RPC receives a proper JSON/JSONB array
-    const rpcPayload: any = {
-      p_total: total,
-      p_payment_method: payment_method || 'unknown',
-      p_items: items,
-      p_user_id: userId,
-      p_shop_id: shopId,
     }
 
     const { data, error } = await supabase.rpc('create_sale', rpcPayload)
@@ -94,7 +112,8 @@ export async function POST(req: Request) {
     } catch (_) {}
 
     return NextResponse.json({ data })
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

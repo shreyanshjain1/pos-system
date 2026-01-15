@@ -4,8 +4,10 @@ import { randomUUID } from 'crypto'
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
-    const { user_id, shop_name } = body
+    const body: unknown = await req.json().catch(() => ({} as unknown))
+    const bodyRec = body as unknown as Record<string, unknown>
+    const user_id = bodyRec?.user_id as string | undefined
+    const shop_name = bodyRec?.shop_name as string | undefined
     if (!user_id || !shop_name) {
       return NextResponse.json({ error: 'user_id and shop_name required' }, { status: 400 })
     }
@@ -23,13 +25,13 @@ export async function POST(req: Request) {
     try {
       // supabaseAdmin.auth.getUser accepts an access token and returns the user
       // (This uses the server client with service role key to inspect the token.)
-      const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+      const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
       if (authErr) throw authErr
-      const tokenUserId = (authData as any)?.user?.id
+      const tokenUserId = (authData as unknown as { user?: { id?: string } })?.user?.id
       if (!tokenUserId || tokenUserId !== user_id) {
         return NextResponse.json({ error: 'Token user mismatch' }, { status: 403 })
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Token validation failed', err)
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
@@ -45,7 +47,7 @@ export async function POST(req: Request) {
 
     if (existing && existing.length > 0) {
       // return the existing shop
-      const shopId = existing[0].shop_id
+      const shopId = (existing[0] as unknown as { shop_id?: string })?.shop_id
       const { data: shop } = await supabaseAdmin.from('shops').select('*').eq('id', shopId).single()
       return NextResponse.json({ shop })
     }
@@ -63,15 +65,16 @@ export async function POST(req: Request) {
     // Map user to shop as owner
     const { data: mapData, error: mapErr } = await supabaseAdmin
       .from('user_shops')
-      .insert({ user_id, shop_id: (shopData as any).id, role: 'owner' })
+      .insert({ user_id, shop_id: (shopData as unknown as { id?: string })?.id, role: 'owner' })
       .select('*')
       .single()
 
     if (mapErr) throw mapErr
 
     return NextResponse.json({ shop: shopData })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Onboard error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

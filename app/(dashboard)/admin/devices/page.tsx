@@ -4,12 +4,13 @@ import { supabase } from '@/lib/supabase/client'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 
-type DeviceRow = { id: string; user_id: string; email?: string | null; device_id: string; device_brand?: string | null; last_seen?: string | null; created_at?: string | null }
+type DeviceRow = { id: string; user_id: string; email?: string | null; device_id: string; device_brand?: string | null; last_seen?: string | null; created_at?: string | null; is_primary?: boolean; is_revoked?: boolean }
 
 export default function AdminDevicesPage() {
   const [loading, setLoading] = useState(true)
   const [devices, setDevices] = useState<DeviceRow[]>([])
   const [offlinePrimaryDeviceId, setOfflinePrimaryDeviceId] = useState<string | null>(null)
+  const [authoritativeDeviceId, setAuthoritativeDeviceId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => { refreshList() }, [])
@@ -26,8 +27,16 @@ export default function AdminDevicesPage() {
         setLoading(false)
         return
       }
-      const json = await res.json().catch(() => ({ data: [] }))
-      setDevices(json.data || [])
+      const json = await res.json().catch(() => ({ data: [] } as unknown))
+      setDevices((json as unknown as { data?: unknown })?.data as DeviceRow[] || [])
+      // fetch authoritative device id for the current shop
+      try {
+        const shopResp = await fetch('/api/shops/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        if (shopResp.ok) {
+          const sj = await shopResp.json().catch(() => ({} as any))
+          setAuthoritativeDeviceId(sj?.data?.authoritative_device_id ?? null)
+        }
+      } catch (_) {}
       // we no longer expose Set Main POS here
     } catch (e) {
       setMessage('Network error')
@@ -52,10 +61,33 @@ export default function AdminDevicesPage() {
     }
   }
 
-  function setAsPrimary(d: DeviceRow) {
-    // locally mark device as primary for the UI (server API not exposed here)
-    setOfflinePrimaryDeviceId(d.device_id)
-    setMessage('Set as primary')
+  async function setAsPrimary(d: DeviceRow) {
+    setMessage(null)
+    try {
+      const session = await supabase.auth.getSession()
+      const token = session?.data?.session?.access_token
+      // Resolve the current user's shop id
+      const shopResp = await fetch('/api/shops/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!shopResp.ok) {
+        throw new Error('Failed to resolve shop')
+      }
+      const shopJson = await shopResp.json().catch(() => ({} as any))
+      const shopId = shopJson?.data?.id
+      if (!shopId) throw new Error('No active shop')
+
+      const res = await fetch('/api/admin/shops/set-authoritative', { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ shop_id: shopId, device_id: d.device_id }) })
+      const j = await res.json().catch(() => ({} as any))
+      if (!res.ok) {
+        setMessage(j?.error || 'Failed to set authoritative device')
+        return
+      }
+      setMessage('Main POS set')
+      // refresh list so UI shows Main POS buttons correctly
+      await refreshList()
+    } catch (e) {
+      setOfflinePrimaryDeviceId(d.device_id)
+      setMessage('Set as primary (local)')
+    }
   }
 
   return (
@@ -89,13 +121,13 @@ export default function AdminDevicesPage() {
                     <td className="px-3 py-3 align-top">{d.last_seen ? new Date(d.last_seen).toLocaleString() : '—'}</td>
                     <td className="px-3 py-3 align-top text-right">
                       <div className="flex gap-2 justify-end">
-                        {((d as any).is_primary || (offlinePrimaryDeviceId && offlinePrimaryDeviceId === d.device_id)) ? (
+                        {((d.is_primary) || (authoritativeDeviceId && authoritativeDeviceId === d.device_id) || (offlinePrimaryDeviceId && offlinePrimaryDeviceId === d.device_id)) ? (
                           <Button intent="secondary" disabled>Main POS</Button>
                         ) : (
                           <Button intent="secondary" onClick={() => setAsPrimary(d)}>Set Main POS</Button>
                         )}
 
-                        { (d as any).is_revoked ? (
+                        { d.is_revoked ? (
                           <Button onClick={async () => {
                             if (!confirm('Unrevoke this device and allow access?')) return
                             setMessage(null)
@@ -104,8 +136,8 @@ export default function AdminDevicesPage() {
                               const token = session?.data?.session?.access_token
                               const res = await fetch('/api/admin/devices/unrevoke', { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ id: d.id }) })
                               if (!res.ok) {
-                                const json = await res.json().catch(() => ({}))
-                                setMessage(json?.error || 'Unrevoke failed')
+                                const json = await res.json().catch(() => ({} as Record<string, unknown>))
+                                setMessage((json as Record<string, unknown>)?.error as string || 'Unrevoke failed')
                                 return
                               }
                               setMessage('Device unrevoked')
@@ -123,8 +155,8 @@ export default function AdminDevicesPage() {
                                 const token = session?.data?.session?.access_token
                                 const res = await fetch('/api/admin/devices/revoke', { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ id: d.id, notify: true }) })
                                 if (!res.ok) {
-                                  const json = await res.json().catch(() => ({}))
-                                  setMessage(json?.error || 'Revoke failed')
+                                  const json = await res.json().catch(() => ({} as Record<string, unknown>))
+                                  setMessage((json as Record<string, unknown>)?.error as string || 'Revoke failed')
                                   return
                                 }
                                 setMessage('Revoked and user notified')

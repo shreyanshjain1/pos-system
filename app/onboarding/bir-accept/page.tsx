@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 import { supabase } from '@/lib/supabase/client'
+import Link from 'next/link'
 
 const DISCLAIMER_TITLE = 'BIR & Tax Responsibility Disclaimer'
 const DISCLAIMER_BODY = `I acknowledge and agree that this POS system is provided as a sales, inventory, and reporting tool only.`
@@ -34,7 +35,8 @@ export default function BirAcceptPage() {
       let token: string | null = null
       try {
         const { data: sessionData } = await supabase.auth.getSession()
-        token = (sessionData as any)?.session?.access_token ?? null
+        const sessionObj = sessionData as unknown as { session?: { access_token?: string } } | undefined
+        token = sessionObj?.session?.access_token ?? null
       } catch (e) {}
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -45,11 +47,15 @@ export default function BirAcceptPage() {
         headers,
         body: JSON.stringify({ disclaimer_version: '2026-01-14-v1', disclaimer_text: STORAGE_FULL_TEXT })
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Failed to record acceptance')
+      const data: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof data === 'object' && data !== null ? (data as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Failed to record acceptance')
+      }
       setSubmitted(true)
-    } catch (err: any) {
-      setError(err?.message || String(err))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || String(err))
     } finally {
       setLoading(false)
     }
@@ -81,7 +87,8 @@ export default function BirAcceptPage() {
     ;(async () => {
       try {
         const { data } = await supabase.auth.getSession()
-        const token = (data as any)?.session?.access_token ?? null
+        const sessionObj = data as unknown as { session?: { access_token?: string } } | undefined
+        const token = sessionObj?.session?.access_token ?? null
         if (!mounted) return
         setIsAuthenticated(!!token)
       } catch (e) {
@@ -129,14 +136,14 @@ export default function BirAcceptPage() {
 
                     {error && <div className="text-red-600">{error}</div>}
                     {isAuthenticated === false && (
-                      <div className="text-red-600">Not authenticated — <a href="/login" className="text-indigo-600 underline">Sign in</a> to submit acceptance.</div>
+                      <div className="text-red-600">Not authenticated — <Link href="/login" className="text-indigo-600 underline">Sign in</Link> to submit acceptance.</div>
                     )}
 
                     <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3">
                       <button type="submit" disabled={!checked || loading || isAuthenticated === false} className="flex-1 inline-flex items-center justify-center px-4 py-3 bg-emerald-600 text-white rounded-md shadow hover:bg-emerald-700 disabled:opacity-60">
                         {loading ? 'Submitting — Await admin approval…' : 'Submit Acceptance — Await Admin Approval'}
                       </button>
-                      <a href="/" className="text-sm text-slate-500 self-center">Cancel</a>
+                      <Link href="/" className="text-sm text-slate-500 self-center">Cancel</Link>
                     </div>
                     <div className="pt-2 text-xs text-slate-400">Your acceptance will be reviewed by an administrator before POS activation.</div>
                   </form>
@@ -144,8 +151,8 @@ export default function BirAcceptPage() {
                   <div className="space-y-4 text-center">
                     <h3 className="text-lg font-medium">Submission recorded</h3>
                     <p className="text-sm text-slate-600">Thank you. Your acceptance has been recorded and is awaiting administrative approval. You will be able to use the POS once an admin approves your activation.</p>
-                    <div>
-                      <a href="/" className="inline-block px-4 py-2 bg-slate-100 rounded-md text-sm">Return home</a>
+                      <div>
+                      <Link href="/" className="inline-block px-4 py-2 bg-slate-100 rounded-md text-sm">Return home</Link>
                     </div>
                   </div>
                 )}

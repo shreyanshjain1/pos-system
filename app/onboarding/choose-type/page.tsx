@@ -8,7 +8,8 @@ export default async function Page() {
   // server-side: ensure authenticated and check shop
   try {
     const { data: sessionData } = await supabase.auth.getSession()
-    const userId = (sessionData as any)?.session?.user?.id ?? null
+    const sessionObj = sessionData as unknown as { session?: { user?: { id?: string } } } | undefined
+    const userId = sessionObj?.session?.user?.id ?? null
     if (!userId) return redirect('/login')
 
     const shop = await getShopForUserOrCreate(userId)
@@ -23,7 +24,6 @@ export default async function Page() {
           <h1>Welcome — pick your POS type</h1>
           <p className="muted">This choice is permanent. It determines which flows and defaults you get.</p>
           {/* client component handles action */}
-          {/* @ts-expect-error Server Component passes props to client */}
           <ChooseTypeClient shop={shop} />
         </div>
       </main>

@@ -12,7 +12,8 @@ export async function GET() {
     // this verifies DB connectivity and permissions
     const { data, error } = await admin.from('shops').select('id').limit(1)
     return NextResponse.json({ ok: true, url: Boolean(url), anon, service, shopsSample: data ?? null, shopsError: error ?? null })
-  } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err?.message || String(err) }, { status: 500 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ ok: false, error: message }, { status: 500 })
   }
 }

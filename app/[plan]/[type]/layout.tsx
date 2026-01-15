@@ -6,8 +6,10 @@ import { redirect } from 'next/navigation'
 const ALLOWED_PLANS = ['basic', 'pro', 'advance']
 const ALLOWED_TYPES = ['retail', 'coffee', 'food', 'building_materials', 'services']
 
-export default async function Layout({ children, params }: { children: React.ReactNode, params: { plan: string, type: string } }) {
-  const { plan, type } = params
+export default async function Layout({ children, params }: { children: React.ReactNode, params: Promise<{ plan: string, type: string }> | { plan: string, type: string } }) {
+  const resolved = await params as { plan?: string, type?: string }
+  const plan = resolved?.plan ?? ''
+  const type = resolved?.type ?? ''
   if (!ALLOWED_PLANS.includes(plan)) {
     return redirect(`/basic/${type || 'retail'}/dashboard`)
   }
@@ -16,7 +18,8 @@ export default async function Layout({ children, params }: { children: React.Rea
   }
 
   const { data: sessionData } = await supabase.auth.getSession()
-  const userId = (sessionData as any)?.session?.user?.id ?? null
+  const sessionObj = sessionData as unknown as { session?: { user?: { id?: string } } } | undefined
+  const userId = sessionObj?.session?.user?.id ?? null
   if (!userId) return redirect('/login')
 
   const shop = await getShopForUserOrCreate(userId)

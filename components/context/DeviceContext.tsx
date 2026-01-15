@@ -4,22 +4,23 @@ import supabase from '@/lib/supabase/client'
 import { getOrCreateDeviceId, registerDeviceWithServer, getStoredDeviceId } from '@/lib/devices'
 import fetchWithAuth from '@/lib/fetchWithAuth'
 import { isMainPOSDevice } from '@/lib/permissions'
+import { startAutoSync, stopAutoSync } from '@/lib/offlineSync'
 
 type DeviceContextValue = {
   deviceId: string | null
-  deviceRow: any | null
-  shop: any | null
+  deviceRow: unknown | null
+  shop: unknown | null
   isMain: boolean
   isRevoked: boolean
   loading: boolean
 }
 
-const DeviceContext = createContext<DeviceContextValue | undefined>(undefined)
+const DeviceContext = createContext<DeviceContextValue | null>(null)
 
 export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [deviceId, setDeviceId] = useState<string | null>(null)
-  const [deviceRow, setDeviceRow] = useState<any | null>(null)
-  const [shop, setShop] = useState<any | null>(null)
+  const [deviceRow, setDeviceRow] = useState<unknown | null>(null)
+  const [shop, setShop] = useState<unknown | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -35,8 +36,10 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
         // get session token
         let accessToken: string | null = null
         try {
-          const { data } = await (supabase as any).auth.getSession()
-          accessToken = (data as any)?.session?.access_token ?? null
+          // supabase client may have different runtime shapes; treat response as unknown and narrow
+          const sessionResp = await (supabase as unknown as { auth?: { getSession?: () => Promise<unknown> } })?.auth?.getSession?.()
+          const data = sessionResp as unknown
+          accessToken = (data as unknown as { session?: { access_token?: string } })?.session?.access_token ?? null
         } catch (e) {}
 
         // register device if we have a token
@@ -51,7 +54,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
               // fallback: try the helper that uses direct fetch and persists id
               try {
                 const alt = await registerDeviceWithServer(accessToken, id ?? undefined)
-                if (alt && (alt as any).ok) {
+                if (alt && (alt as unknown as { ok?: boolean }).ok) {
                   // attempt to fetch device row by querying register response again
                   const retry = await fetchWithAuth('/api/devices/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ device_id: id }) })
                   const rjson = await retry.json().catch(() => ({}))
@@ -65,7 +68,7 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
             // last-resort: call registerDeviceWithServer helper
             try {
               const alt = await registerDeviceWithServer(accessToken, id ?? undefined)
-              if (alt && (alt as any).ok) {
+              if (alt && (alt as unknown as { ok?: boolean }).ok) {
                 // try fetching again
                 const retry = await fetchWithAuth('/api/devices/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ device_id: id }) })
                 const rjson = await retry.json().catch(() => ({}))
@@ -88,23 +91,62 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       }
     }
     init()
+    // start offline sync processor (best-effort)
+    const stop = startAutoSync({ intervalMs: 20_000 })
     return () => { mounted = false }
   }, [])
 
-  const isMain = isMainPOSDevice({ shop, deviceRow, device_id: deviceId })
-  const isRevoked = !!(deviceRow && deviceRow.is_revoked)
+  useEffect(() => {
+    return () => {
+      try { stopAutoSync() } catch (_) {}
+    }
+  }, [])
+
+  // PWA: register service worker and handle install prompt
+  const [installPrompt, setInstallPrompt] = useState<any | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    // register sw
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+    const onBefore = (e: any) => {
+      e.preventDefault()
+      setInstallPrompt(e)
+    }
+    window.addEventListener('beforeinstallprompt', onBefore as EventListener)
+    return () => { window.removeEventListener('beforeinstallprompt', onBefore as EventListener) }
+  }, [])
+
+  // Local shape types to match `lib/permissions` expectations
+  type ShopLike = { pos_device_id?: unknown; offline_primary_device_id?: unknown } | null
+  type DeviceRowLike = { is_revoked?: boolean } | null
+
+  const isMain = isMainPOSDevice({ shop: shop as unknown as ShopLike, deviceRow: deviceRow as unknown as DeviceRowLike, device_id: deviceId })
+  const isRevoked = !!((deviceRow as unknown as DeviceRowLike)?.is_revoked)
 
   return (
     <DeviceContext.Provider value={{ deviceId, deviceRow, shop, isMain, isRevoked, loading }}>
       {children}
+      {installPrompt ? (
+        <div className="fixed right-4 bottom-6 z-50">
+          <button className="bg-emerald-600 text-white px-3 py-2 rounded-lg shadow-lg" onClick={async () => {
+            try {
+              const promptEvent = installPrompt
+              promptEvent.prompt()
+              const choice = await promptEvent.userChoice
+              setInstallPrompt(null)
+            } catch (e) { setInstallPrompt(null) }
+          }}>Install POS App</button>
+        </div>
+      ) : null}
     </DeviceContext.Provider>
   )
 }
 
 export function useDevice() {
   const ctx = useContext(DeviceContext)
-  if (!ctx) throw new Error('useDevice must be used within DeviceProvider')
-  return ctx
+  return ctx ?? null
 }
 
 export default DeviceContext

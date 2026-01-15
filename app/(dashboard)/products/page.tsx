@@ -4,6 +4,7 @@ import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 type Product = { id: string; name: string; price: number; stock: number; barcode?: string }
@@ -46,7 +47,8 @@ export default function ProductsPage() {
     window.addEventListener('resize', checkMobile)
 
     // subscribe to product changes and refresh list
-    const channel = supabase
+    const client = supabase as unknown as SupabaseClient
+    const channel = client
       .channel('public:products')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
         fetchList()
@@ -96,11 +98,16 @@ export default function ProductsPage() {
     setLoading(true)
     try {
       const res = await fetchWithAuth('/api/products')
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Failed to load products')
-      setProducts(json.data || [])
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load')
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Failed to load products')
+      }
+      const obj = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
+      setProducts((obj['data'] ?? []) as Product[])
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || 'Failed to load')
     } finally {
       setLoading(false)
     }
@@ -112,17 +119,22 @@ export default function ProductsPage() {
     e.preventDefault()
     setError(null)
     if (!name) return setError('Name is required')
-    const payload: any = { name, price: Number(price || 0), stock: Number(stock || 0), barcode: barcode || null }
+    const payload: Record<string, unknown> = { name, price: Number(price || 0), stock: Number(stock || 0), barcode: barcode || null }
     try {
-      const res = await fetchWithAuth('/api/products', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Create failed')
+      const _did = await (await import('@/lib/devices')).getOrCreateDeviceId()
+      const res = await fetchWithAuth('/api/products', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': _did ?? '' }, body: JSON.stringify({ ...payload, deviceId: _did }) })
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Create failed')
+      }
       setName(''); setPrice(''); setStock('')
       setBarcode('')
       if (isMobile) setShowCreateModal(false)
       fetchList()
-    } catch (err: any) {
-      setError(err?.message || 'Create failed')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || 'Create failed')
     }
   }
 
@@ -148,15 +160,19 @@ export default function ProductsPage() {
     if (!editing) return
     setError(null)
     try {
-      const payload: any = { name: editName, price: Number(editPrice || 0), stock: Number(editStock || 0), barcode: editBarcode || null }
+      const payload: Record<string, unknown> = { name: editName, price: Number(editPrice || 0), stock: Number(editStock || 0), barcode: editBarcode || null }
       const res = await fetchWithAuth(`/api/products/${editing.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Update failed')
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Update failed')
+      }
       if (isMobile) setShowEditModal(false)
       cancelEdit()
       fetchList()
-    } catch (err: any) {
-      setError(err?.message || 'Update failed')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || 'Update failed')
     }
   }
 
@@ -169,13 +185,17 @@ export default function ProductsPage() {
     setError(null)
     try {
       const res = await fetchWithAuth(`/api/products/${id}`, { method: 'DELETE' })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Delete failed')
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Delete failed')
+      }
       // remove from UI optimistically instead of refetching list
       setProducts(prev => prev.filter(p => p.id !== id))
       if (editing?.id === id) cancelEdit()
-    } catch (err: any) {
-      setError(err?.message || 'Delete failed')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || 'Delete failed')
     }
   }
 
@@ -210,7 +230,7 @@ export default function ProductsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 order-last lg:order-first">
           <Card className="p-6">
             {loading ? (
               <div className="h-48 animate-pulse bg-white rounded-md" />
@@ -269,7 +289,7 @@ export default function ProductsPage() {
           </Card>
         </div>
 
-        <div className="max-w-md w-full lg:col-span-1">
+        <div className="max-w-md w-full lg:col-span-1 order-first lg:order-last">
           <Card className="p-6">
             {editing ? (
               <>

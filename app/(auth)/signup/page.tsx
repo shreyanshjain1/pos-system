@@ -6,6 +6,14 @@ import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 
 export default function SignupPage() {
+	const [email, setEmail] = useState('')
+	const [password, setPassword] = useState('')
+	const [confirmPassword, setConfirmPassword] = useState('')
+	const [loading, setLoading] = useState(false)
+	const [error, setError] = useState<string | null>(null)
+	const [message, setMessage] = useState<string | null>(null)
+	const router = useRouter()
+
 	if (!isSupabaseConfigured) {
 		return (
 			<main className="min-h-screen flex items-center justify-center py-12">
@@ -18,13 +26,6 @@ export default function SignupPage() {
 			</main>
 		)
 	}
-	const [email, setEmail] = useState('')
-	const [password, setPassword] = useState('')
-	const [confirmPassword, setConfirmPassword] = useState('')
-	const [loading, setLoading] = useState(false)
-	const [error, setError] = useState<string | null>(null)
-	const [message, setMessage] = useState<string | null>(null)
-	const router = useRouter()
 
 	async function handleSignup(e?: React.FormEvent) {
 		e?.preventDefault()
@@ -36,19 +37,23 @@ export default function SignupPage() {
 		}
 		setLoading(true)
 		try {
-			const { data, error } = await supabase.auth.signUp({ email, password })
-			if (error) throw error
+			const signResp = await supabase.auth.signUp({ email, password })
+			const data = (signResp as unknown as { data?: unknown })?.data
+			const errorObj = (signResp as unknown as { error?: unknown })?.error
+			if (errorObj) throw errorObj as Error
 
-			let userId = (data as any)?.user?.id
-			let accessToken = (data as any)?.session?.access_token
+			let userId = (data as unknown as { user?: { id?: string } })?.user?.id
+			let accessToken = (data as unknown as { session?: { access_token?: string } })?.session?.access_token
 
 			if (!accessToken) {
 				const signIn = await supabase.auth.signInWithPassword({ email, password })
-				if (signIn.error) {
+				const signInError = (signIn as unknown as { error?: unknown })?.error
+				const signInData = (signIn as unknown as { data?: unknown })?.data
+				if (signInError) {
 					setMessage('Check your email to confirm your account. After confirmation, sign in.')
 				} else {
-					userId = (signIn.data as any)?.user?.id || userId
-					accessToken = (signIn.data as any)?.session?.access_token || accessToken
+					userId = (signInData as unknown as { user?: { id?: string } })?.user?.id || userId
+					accessToken = (signInData as unknown as { session?: { access_token?: string } })?.session?.access_token || accessToken
 				}
 			}
 
@@ -65,19 +70,21 @@ export default function SignupPage() {
 						headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
 						body: JSON.stringify({ user_id: userId })
 					})
-					const payload = await resp.json()
-					if (!resp.ok) throw new Error(payload?.error || 'Onboarding failed')
+					const payload = await resp.json().catch(() => ({} as Record<string, unknown>))
+					if (!resp.ok) throw new Error((payload as unknown as { error?: string })?.error || 'Onboarding failed')
 
-					try { localStorage.setItem('pos:active-shop', payload?.shop?.id) } catch (e) {}
+					try { localStorage.setItem('pos:active-shop', (payload as unknown as { shop?: { id?: string } })?.shop?.id ?? '') } catch (e) {}
 					router.push('/pos')
 					return
-				} catch (err: any) {
-					setError(err?.message || 'Onboarding failed')
+				} catch (err: unknown) {
+					const msg = typeof err === 'object' && err !== null && 'message' in err ? String((err as { message?: string }).message) : String(err)
+					setError(msg || 'Onboarding failed')
 					return
 				}
 			}
-		} catch (err: any) {
-			setError(err.message || String(err))
+		} catch (err: unknown) {
+			const msg = typeof err === 'object' && err !== null && 'message' in err ? String((err as { message?: string }).message) : String(err)
+			setError(msg || String(err))
 		} finally {
 			setLoading(false)
 		}

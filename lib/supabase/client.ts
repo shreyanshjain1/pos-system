@@ -28,14 +28,20 @@ if (isSupabaseConfigured) {
 // import-time crashes and lets UI show friendly messages.
 const missingErr = new Error('Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local')
 
-const stub: any = {
-  auth: new Proxy({}, {
-    get() {
-      return async () => { throw missingErr }
-    }
-  })
+type AuthStub = {
+  getSession: () => Promise<{ data?: { session?: { access_token?: string }; user?: { email?: string } } }> 
+  signInWithPassword: (creds: { email: string; password: string }) => Promise<{ data?: unknown; error?: unknown }>
+  signUp: (creds: { email: string; password: string }) => Promise<{ data?: unknown; error?: unknown }>
 }
 
-export const supabase: SupabaseClient | any = _supabase || stub
+const stub: { auth: AuthStub } = {
+  auth: {
+    getSession: async () => { throw missingErr },
+    signInWithPassword: async () => { throw missingErr },
+    signUp: async () => { throw missingErr },
+  }
+}
+
+export const supabase: SupabaseClient | { auth: AuthStub } = _supabase || stub
 
 export default supabase

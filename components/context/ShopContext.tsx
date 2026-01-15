@@ -9,14 +9,13 @@ type ShopContextValue = {
 const ShopContext = createContext<ShopContextValue | undefined>(undefined)
 
 export function ShopProvider({ children }: { children: React.ReactNode }) {
-  const [shopId, setShopIdState] = useState<string | null>(null)
-
-  useEffect(() => {
+  const [shopId, setShopIdState] = useState<string | null>(() => {
     try {
-      const raw = localStorage.getItem('pos:active-shop')
-      if (raw) setShopIdState(raw)
-    } catch (_) {}
-  }, [])
+      return localStorage.getItem('pos:active-shop')
+    } catch (_) {
+      return null
+    }
+  })
 
   function setShopId(id: string | null) {
     try {

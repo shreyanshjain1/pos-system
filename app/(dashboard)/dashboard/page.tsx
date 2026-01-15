@@ -23,18 +23,23 @@ export default function DashboardPage() {
       setLoading(true)
       try {
         const res = await fetchWithAuth('/api/summary')
-        const json = await res.json()
+        const json: unknown = await res.json()
         if (!mounted) return
-        if (!res.ok) throw new Error(json?.error || 'Failed to fetch summary')
+        if (!res.ok) {
+          const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+          throw new Error((errMsg as string) || 'Failed to fetch summary')
+        }
+        const obj = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
         setData({
-          todaysSales: Number(json.todaysSales || 0),
-          totalProducts: Number(json.totalProducts || 0),
-          lowStock: Number(json.lowStock || 0),
+          todaysSales: Number(obj['todaysSales'] ?? 0),
+          totalProducts: Number(obj['totalProducts'] ?? 0),
+          lowStock: Number(obj['lowStock'] ?? 0),
         })
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error(err)
         if (!mounted) return
-        setError(err?.message || 'Failed to load summary')
+        const msg = err instanceof Error ? err.message : String(err)
+        setError(msg || 'Failed to load summary')
       } finally {
         if (mounted) setLoading(false)
       }
@@ -48,7 +53,7 @@ export default function DashboardPage() {
     <div>
       <div className="mb-6">
         <h2 className="text-2xl font-semibold">Overview</h2>
-        <p className="text-sm text-slate-500">Quick summary of today's activity</p>
+        <p className="text-sm text-slate-500">Quick summary of today&apos;s activity</p>
       </div>
 
       {loading && (
@@ -65,7 +70,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card>
             <div className="flex flex-col">
-              <div className="text-sm text-slate-500">Today's sales</div>
+              <div className="text-sm text-slate-500">Today&apos;s sales</div>
               <div className="text-2xl font-bold mt-2">{data.todaysSales.toFixed ? data.todaysSales.toFixed(2) : data.todaysSales}</div>
             </div>
           </Card>

@@ -4,7 +4,8 @@ import { redirect } from 'next/navigation'
 
 export default async function Page({ params }: { params: { plan: string } }) {
   const { data: sessionData } = await supabase.auth.getSession()
-  const userId = (sessionData as any)?.session?.user?.id ?? null
+  const sessionObj = sessionData as unknown as { session?: { user?: { id?: string } } } | undefined
+  const userId = sessionObj?.session?.user?.id ?? null
   if (!userId) return redirect('/login')
 
   const shop = await getShopForUserOrCreate(userId)

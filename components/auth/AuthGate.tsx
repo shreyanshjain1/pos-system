@@ -57,7 +57,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
     init()
     // subscribe to auth state changes so UI updates immediately after sign-in/sign-out
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const authHandler = supabase.auth as unknown as { onAuthStateChange: (cb: (event: string, session: unknown) => void) => { data?: { subscription?: { unsubscribe?: () => void } } } }
+    const { data: sub } = authHandler.onAuthStateChange((_event: string, session: unknown) => {
       if (!mounted) return
       setStatus(session ? 'authed' : 'guest')
     })

@@ -11,9 +11,9 @@ export async function GET(req: NextRequest) {
 
     if (authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1]
-      const { data: authData, error: authErr } = await (admin.auth as any).getUser(token)
+      const { data: authData, error: authErr } = await (admin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(token)
       if (authErr) return NextResponse.json({ authenticated: false, accepted: false })
-      userId = (authData as any)?.user?.id || null
+      userId = (authData as unknown as { user?: { id?: string } })?.user?.id || null
     } else {
       // fallback: try to read from cookie via existing helper logic
       const cookie = req.headers.get('cookie') || undefined

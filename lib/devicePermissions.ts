@@ -1,4 +1,7 @@
-export function canCheckout({ device, shop, isOnline }: { device: any | null; shop: any | null; isOnline: boolean }): boolean {
+type DeviceLike = { is_revoked?: boolean; can_checkout?: boolean; device_id?: string | number } | null
+type ShopLike = { offline_primary_device_id?: string | number } | null
+
+export function canCheckout({ device, shop, isOnline }: { device: DeviceLike; shop: ShopLike; isOnline: boolean }): boolean {
   if (!device) return false
   if (device.is_revoked) return false
   if (!device.can_checkout) return false
@@ -7,7 +10,7 @@ export function canCheckout({ device, shop, isOnline }: { device: any | null; sh
   return String(device.device_id) === String(shop.offline_primary_device_id)
 }
 
-export function requiresOnlineForProductEdit({ device, isOnline }: { device: any | null; isOnline: boolean }) {
+export function requiresOnlineForProductEdit({ device, isOnline }: { device: DeviceLike; isOnline: boolean }): boolean {
   if (!device) return false
   return device.can_checkout === true && isOnline === true
 }

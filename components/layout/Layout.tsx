@@ -21,7 +21,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       }
     }
     check()
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const authHandler = supabase.auth as unknown as { onAuthStateChange: (cb: (event: string, session: unknown) => void) => { data?: { subscription?: { unsubscribe?: () => void } } } }
+    const { data: sub } = authHandler.onAuthStateChange((_event: string, session: unknown) => {
       if (!mounted) return
       setAuthed(Boolean(session))
     })

@@ -44,13 +44,18 @@ export default function SalesPage() {
         window.location.href = '/onboard'
         return
       }
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Failed to load sales')
-      setSales(json.data || [])
-      setCount(json.count ?? null)
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
-      setError(err?.message || 'Failed to load')
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Failed to load sales')
+      }
+      const obj = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
+      setSales((obj['data'] ?? []) as Sale[])
+      setCount((obj['count'] as number) ?? null)
+    } catch (err: unknown) {
+      if (typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError') return
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || 'Failed to load')
     } finally {
       setLoading(false)
       fetchControllerRef.current = null
@@ -73,33 +78,68 @@ export default function SalesPage() {
           <div className="text-red-600">{error}</div>
         ) : (
           <div>
-            <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-600">
-                  <th className="py-2 text-left">ID</th>
-                  <th className="py-2 text-left">Date</th>
-                  <th className="py-2 text-right">Total</th>
-                  <th className="py-2 text-left">Payment</th>
-                  <th className="py-2 text-right">Items</th>
-                  <th className="py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sales.map(s => (
-                  <tr key={s.id} className="border-t border-gray-100">
-                    <td className="py-3">{s.id}</td>
-                    <td className="py-3">{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</td>
-                    <td className="py-3 text-right">{formatCurrency(s.total)}</td>
-                    <td className="py-3">{s.payment_method ?? '—'}</td>
-                    <td className="py-3 text-right">{(s.sale_items || []).length}</td>
-                    <td className="py-3 text-right">
-                      <Button onClick={() => setDetail(s)}>View</Button>
-                    </td>
+            {/* Desktop/tablet: table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-slate-600">
+                    <th className="py-2 text-left">ID</th>
+                    <th className="py-2 text-left">Date</th>
+                    <th className="py-2 text-right">Total</th>
+                    <th className="py-2 text-left">Payment</th>
+                    <th className="py-2 text-right">Items</th>
+                    <th className="py-2 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sales.map(s => (
+                    <tr key={s.id} className="border-t border-gray-100">
+                      <td className="py-3">{s.id}</td>
+                      <td className="py-3">{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</td>
+                      <td className="py-3 text-right">{formatCurrency(s.total)}</td>
+                      <td className="py-3">{s.payment_method ?? '—'}</td>
+                      <td className="py-3 text-right">{(s.sale_items || []).length}</td>
+                      <td className="py-3 text-right">
+                        <Button onClick={() => setDetail(s)}>View</Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile: stacked cards */}
+            <div className="md:hidden space-y-3">
+              {sales.map(s => (
+                <div key={s.id} className="border rounded-lg p-3 bg-white">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="text-xs text-slate-500">ID</div>
+                      <div className="text-sm break-words">{s.id}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-500">Total</div>
+                      <div className="font-semibold">{formatCurrency(s.total)}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-slate-600">
+                    <div>
+                      <div className="text-xs text-slate-500">Date</div>
+                      <div>{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Payment</div>
+                      <div>{s.payment_method ?? '—'}</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="text-sm text-slate-600">Items: {(s.sale_items || []).length}</div>
+                    <Button onClick={() => setDetail(s)}>View</Button>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <div className="mt-4 flex items-center justify-between flex-wrap gap-3">
@@ -125,7 +165,10 @@ export default function SalesPage() {
                     storeName={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.storeName || 'Store') : 'Store'}
                     header={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.receiptHeader || '') : ''}
                     footer={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.receiptFooter || '') : ''}
-                    items={(detail.sale_items || []).map((it: any) => ({ name: it.product?.name ?? it.product_name ?? it.product_id, qty: it.quantity, price: it.price ?? 0 }))}
+                    items={(detail.sale_items || []).map((it: unknown) => {
+                      const r = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
+                      return { name: (r['product'] && typeof r['product'] === 'object' ? ((r['product'] as Record<string, unknown>)['name']) : (r['product_name'] ?? r['product_id'])) as string, qty: Number(r['quantity'] ?? 0), price: Number(r['price'] ?? 0) }
+                    })}
                     total={detail.total}
                     currency={typeof window !== 'undefined' ? (JSON.parse(localStorage.getItem('pos:settings') || '{}')?.currency || 'PHP') : 'PHP'}
                   />
@@ -139,7 +182,10 @@ export default function SalesPage() {
                   <div className="mb-2"><strong>Total:</strong> {formatCurrency(detail.total)}</div>
 
                   <div className="mt-3">
-                    <ThermalReceipt sale={{ id: detail.id, created_at: detail.created_at, items: (detail.sale_items || []).map((it: any) => ({ name: it.product?.name ?? it.product_name ?? it.product_id, qty: it.quantity, price: it.price ?? 0 })), total: detail.total }} />
+                    <ThermalReceipt sale={{ id: detail.id, created_at: detail.created_at, items: (detail.sale_items || []).map((it: unknown) => {
+                      const r = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
+                      return { name: (r['product'] && typeof r['product'] === 'object' ? ((r['product'] as Record<string, unknown>)['name']) : (r['product_name'] ?? r['product_id'])) as string, qty: Number(r['quantity'] ?? 0), price: Number(r['price'] ?? 0) }
+                    }), total: detail.total }} />
                   </div>
 
                   <div className="mt-4 flex justify-end gap-2">

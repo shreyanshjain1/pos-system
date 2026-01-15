@@ -12,13 +12,13 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const userId = (authData as any)?.user?.id
+    const userId = (authData as unknown as { user?: { id?: string } })?.user?.id
     if (!userId) return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
 
-    const body = await req.json().catch(() => ({}))
-    const pos_type = body?.pos_type
+    const body: unknown = await req.json().catch(() => ({} as unknown))
+    const pos_type = (body as unknown as Record<string, unknown>)?.pos_type
     if (!pos_type) return NextResponse.json({ error: 'Missing pos_type' }, { status: 400 })
 
     // find shop
@@ -36,8 +36,9 @@ export async function POST(req: Request) {
     if (upd.error) throw upd.error
 
     return NextResponse.json({ shop: upd.data })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('set-pos-type error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

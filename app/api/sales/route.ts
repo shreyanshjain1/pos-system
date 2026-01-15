@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { getSubscriptionStatus } from '@/lib/subscription'
 
+type SupabaseAuthLike = { getUser: (token: string) => Promise<{ data?: unknown; error?: unknown }> }
+type SupabaseUserData = { user?: { id?: string } }
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
@@ -18,11 +21,11 @@ export async function GET(req: Request) {
     if (authHeader.startsWith('Bearer ')) {
       const accessToken = authHeader.split(' ')[1]
       try {
-        const { data: authData, error: authErr } = await (supabase.auth as any).getUser(accessToken)
-        if (!authErr && authData?.user?.id) {
-          const userId = authData.user.id
+        const { data: authData, error: authErr } = await (supabase.auth as unknown as SupabaseAuthLike).getUser(accessToken)
+        const userId = (authData as unknown as SupabaseUserData)?.user?.id
+        if (!authErr && userId) {
           const { data: mappings } = await supabase.from('user_shops').select('shop_id').eq('user_id', userId)
-          shopIds = (mappings || []).map((m: any) => m.shop_id).filter(Boolean)
+          shopIds = (mappings || []).map((m: unknown) => (m as unknown as { shop_id?: string }).shop_id).filter(Boolean) as string[]
         }
       } catch (e) {
         console.warn('Sales GET: token validation failed', e)
@@ -51,8 +54,8 @@ export async function GET(req: Request) {
       const authHeader2 = req.headers.get('authorization') || ''
       if (authHeader2.startsWith('Bearer ')) {
         const token = authHeader2.split(' ')[1]
-        const { data: authData } = await (supabase.auth as any).getUser(token)
-        const userId = (authData as any)?.user?.id
+        const { data: authData } = await (supabase.auth as unknown as SupabaseAuthLike).getUser(token)
+        const userId = (authData as unknown as SupabaseUserData)?.user?.id
         if (userId) {
           const status = await getSubscriptionStatus(supabase, userId)
           if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
@@ -67,7 +70,8 @@ export async function GET(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     return NextResponse.json({ data, count })
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

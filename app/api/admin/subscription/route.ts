@@ -18,23 +18,24 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin()
 
     // Validate token and get caller
-    const { data: authData, error: authErr } = await (supabaseAdmin.auth as any).getUser(accessToken)
+    const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown; error?: unknown }> }).getUser(accessToken)
     if (authErr) throw authErr
-    const callerEmail = (authData as any)?.user?.email
+    const callerEmail = (authData as unknown as { user?: { email?: string } })?.user?.email
     if (!isOwnerEmail(callerEmail)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const body = await req.json().catch(() => ({}))
-    const user_id = body?.user_id
-    const plan = body?.plan ?? null
-    const expiry_date = body?.expiry_date ?? null
+    const body: unknown = await req.json().catch(() => ({} as unknown))
+    const bodyRec = body as unknown as Record<string, unknown>
+    const user_id = bodyRec?.user_id as string | undefined
+    const plan = bodyRec?.plan ?? null
+    const expiry_date = bodyRec?.expiry_date ?? null
 
     if (!user_id) return NextResponse.json({ error: 'Missing user_id' }, { status: 400 })
 
     // Upsert subscription: since `user_id` may not have a unique constraint,
     // perform select -> update or insert to avoid ON CONFLICT errors.
-    const payload: any = { user_id, plan: plan, expiry_date: expiry_date }
+    const payload: Record<string, unknown> = { user_id, plan: plan, expiry_date: expiry_date }
 
     // check if a subscription exists for this user
     const { data: existing, error: selectErr } = await supabaseAdmin
@@ -47,8 +48,8 @@ export async function POST(req: Request) {
       throw selectErr
     }
 
-    let resData: any = null
-    if (existing && existing.id) {
+    let resData: unknown = null
+    if (existing && (existing as unknown as { id?: string }).id) {
       const { data: updated, error: updateErr } = await supabaseAdmin
         .from('user_subscriptions')
         .update({ plan: payload.plan, expiry_date: payload.expiry_date })
@@ -68,8 +69,9 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ data: resData })
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('admin/subscription POST error', err)
-    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Server error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

@@ -11,7 +11,7 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
     let mounted = true
 
     async function check() {
-      let client: any = null
+      let client: ReturnType<typeof createBrowserClient> | null = null
       try {
         client = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL || '', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')
       } catch (err) {

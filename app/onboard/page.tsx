@@ -29,8 +29,9 @@ export default function OnboardPage() {
       let userId: string | null = null
       try {
         const { data: sessionData } = await supabase.auth.getSession()
-        accessToken = (sessionData as any)?.session?.access_token ?? null
-        userId = (sessionData as any)?.session?.user?.id ?? null
+        const sessionObj = sessionData as unknown as { session?: { access_token?: string; user?: { id?: string } } } | undefined
+        accessToken = sessionObj?.session?.access_token ?? null
+        userId = sessionObj?.session?.user?.id ?? null
       } catch (e) {
         console.warn('Onboard: getSession failed', e)
       }
@@ -49,9 +50,11 @@ export default function OnboardPage() {
       const payload = await resp.json()
       if (!resp.ok) throw new Error(payload?.error || 'Onboarding failed')
       try { localStorage.setItem('pos:active-shop', payload?.shop?.id) } catch (e) {}
-      router.push('/pos')
-    } catch (err: any) {
-      setError(err?.message || String(err))
+      // After creating a shop, require BIR acceptance step before dashboard
+      router.push('/onboarding/bir-accept')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || String(err))
     } finally {
       setLoading(false)
     }

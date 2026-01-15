@@ -1,16 +1,19 @@
 "use client"
-"use client"
+
 import React from 'react'
-import { motion } from 'framer-motion'
+import { motion, HTMLMotionProps } from 'framer-motion'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
+
+type ButtonProps = Omit<HTMLMotionProps<'button'>, 'ref'> & { variant?: Variant; intent?: Variant; className?: string }
 
 export default function Button({
   children,
   variant = 'primary',
+  intent,
   className = '',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; className?: string }) {
+}: ButtonProps) {
   const base = 'inline-flex items-center justify-center rounded-xl font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2'
   const sizes = 'h-10 px-4 text-sm'
 
@@ -21,10 +24,12 @@ export default function Button({
     danger: 'bg-red-600 text-white hover:bg-red-700',
   }
 
+  const chosen = intent ?? variant
+
   return (
     <motion.button
       whileTap={{ scale: 0.98 }}
-      className={`${base} ${sizes} ${variants[variant]} ${className}`}
+      className={`${base} ${sizes} ${variants[chosen]} ${className}`}
       {...props}
     >
       {children}

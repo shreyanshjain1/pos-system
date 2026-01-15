@@ -164,7 +164,7 @@ export default function ThermalReceipt({ sale }: { sale: Sale }) {
     `
   }
 
-  function escapeHtml(str: any) {
+  function escapeHtml(str: unknown) {
     if (str === null || str === undefined) return ''
     return String(str)
       .replace(/&/g, '&amp;')

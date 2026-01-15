@@ -8,10 +8,12 @@ import Input from '@/components/ui/Input'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import fetchWithAuth from '@/lib/fetchWithAuth'
+import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem } from '@/lib/offlineQueue'
+import { getOrCreateDeviceId } from '@/lib/devices'
+import BarcodeScanListener from '@/components/scan/BarcodeScanListener'
 import ThermalReceipt from '@/components/print/ThermalReceipt'
 import ReceiptPreview from '@/components/print/ReceiptPreview'
 import { useRef } from 'react'
-import { useDevice } from '@/components/context/DeviceContext'
 
 type Product = { id: string; name: string; price: number; stock: number; barcode?: string }
 type CartItem = { product: Product; qty: number }
@@ -24,13 +26,18 @@ export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [checkingOut, setCheckingOut] = useState(false)
-  const [receipt, setReceipt] = useState<any | null>(null)
+  const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [paymentAmount, setPaymentAmount] = useState<string>('')
   const [showScanner, setShowScanner] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
   const [manualBarcode, setManualBarcode] = useState<string>('')
   const [scanMessage, setScanMessage] = useState<string | null>(null)
+  const [createBarcodeModalOpen, setCreateBarcodeModalOpen] = useState(false)
+  const [pendingBarcodeToCreate, setPendingBarcodeToCreate] = useState<string | null>(null)
+  const [createName, setCreateName] = useState<string>('')
+  const [createPrice, setCreatePrice] = useState<string>('0')
+  const [createStock, setCreateStock] = useState<string>('0')
   const [scannerDeviceId, setScannerDeviceId] = useState<string | null>(null)
   const [scannerMode, setScannerMode] = useState<'keyboard'>('keyboard')
   const [realtimeMessage, setRealtimeMessage] = useState<string | null>(null)
@@ -38,7 +45,7 @@ export default function POSPage() {
   const [lastRealtimeAt, setLastRealtimeAt] = useState<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const inspectTimerRef = useRef<number | null>(null)
-  const pendingRealtimeRef = useRef<any[]>([])
+  const pendingRealtimeRef = useRef<Record<string, unknown>[]>([])
   const realtimeDebounceRef = useRef<number | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [showCartModal, setShowCartModal] = useState(false)
@@ -88,11 +95,7 @@ export default function POSPage() {
     }
   }, [])
 
-  const deviceCtx = (() => {
-    try { return useDevice() } catch (_) { return null }
-  })()
-  const isDeviceRevoked = deviceCtx?.isRevoked === true
-  const isDeviceMain = deviceCtx?.isMain === true
+  // Device-ID based enforcement removed: allow all devices to create/checkout
 
   // Offline sync removed: no background queue or periodic sync
 
@@ -103,11 +106,16 @@ export default function POSPage() {
     try {
       // Attach current user's access token so server can scope by shop
       const res = await fetchWithAuth('/api/products')
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Failed to load')
-      setProducts(json.data || [])
-    } catch (err: any) {
-      if (!skipLoading) setError(err?.message || 'Failed to load')
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Failed to load')
+      }
+      const obj = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
+      setProducts((obj['data'] ?? []) as Product[])
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!skipLoading) setError(msg || 'Failed to load')
     } finally {
       if (!skipLoading) setLoading(false)
     }
@@ -128,8 +136,23 @@ export default function POSPage() {
       setScanError('Detected empty barcode')
       return
     }
-    const prod = products.find(p => p.barcode && String(p.barcode).trim() === normalized)
-    if (prod) {
+    // try cached lookup first
+    (async () => {
+      try {
+        const cached = await lookupBarcodeCached(normalized)
+        if (cached) {
+          addToCart(cached)
+          setError(null)
+          setScanError(null)
+          setScanMessage(`${cached.name} added`)
+          setManualBarcode('')
+          setTimeout(() => setScanMessage(null), 1400)
+          return
+        }
+      } catch (e) { console.debug('cache lookup error', e) }
+
+      const prod = products.find(p => p.barcode && String(p.barcode).trim() === normalized)
+      if (prod) {
       console.debug('Matched product:', prod.id, prod.name)
       addToCart(prod)
       setError(null)
@@ -138,12 +161,20 @@ export default function POSPage() {
       setManualBarcode('')
       // clear success message after a short delay
       setTimeout(() => setScanMessage(null), 1400)
+        return
     } else {
       console.warn('No product found for barcode:', normalized)
-      setScanError(`No product found for barcode: ${normalized}`)
-      // also set global error so it shows in the products panel
-      setError(`No product found for barcode: ${normalized}`)
+        setScanError(`No product found for barcode: ${normalized}`)
+        setError(`No product found for barcode: ${normalized}`)
+        // If this device is authoritative, open modal to create or assign
+        // Open create modal for any device when barcode not found
+        setPendingBarcodeToCreate(normalized)
+        setCreateName('')
+        setCreatePrice('0')
+        setCreateStock('0')
+        setCreateBarcodeModalOpen(true)
     }
+    })()
   }
 
   function handleManualAdd() {
@@ -178,8 +209,6 @@ export default function POSPage() {
   function handleCheckout() {
     if (cart.length === 0) return setError('Cart is empty')
     setError(null)
-    if (isDeviceRevoked) return setError('This device is revoked and cannot perform checkouts')
-    if (!isDeviceMain) return setError('This device is view-only. Only the Main POS device can transact.')
     // open payment modal and prefill with total
     const total = computeTotal()
     setPaymentAmount(String(total))
@@ -193,31 +222,35 @@ export default function POSPage() {
     const items = cart.map(i => ({ product_id: i.product.id, quantity: i.qty, price: i.product.price }))
     const total = computeTotal()
     const change = Number((payment - total).toFixed(2))
-    const payload: any = { items, total, payment_method: 'cash', payment, change }
+    const payload: Record<string, unknown> = { items, total, payment_method: 'cash', payment, change }
     try {
-      // include auth token so backend assigns correct shop and validates ownership
-      const res = await fetchWithAuth('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || 'Checkout failed')
+      // include auth token and device id so backend assigns correct shop and validates ownership
+      const _did = await getOrCreateDeviceId()
+      const res = await fetchWithAuth('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': _did ?? '' }, body: JSON.stringify({ ...payload, deviceId: _did }) })
+      const json: unknown = await res.json()
+      if (!res.ok) {
+        const errMsg = typeof json === 'object' && json !== null ? (json as Record<string, unknown>)['error'] : undefined
+        throw new Error((errMsg as string) || 'Checkout failed')
+      }
       // success: clear cart and refresh products
       setCart([])
       fetchProducts()
       // attach payment and change to receipt for display if backend doesn't include them
-      const receiptData = json?.data ?? json
-      if (receiptData) {
-        if (receiptData.sale) {
-          receiptData.sale.payment = receiptData.sale.payment ?? payment
-          receiptData.sale.change = receiptData.sale.change ?? change
-        } else {
-          receiptData.payment = receiptData.payment ?? payment
-          receiptData.change = receiptData.change ?? change
+      const receiptData: unknown = typeof json === 'object' && json !== null ? ((json as Record<string, unknown>)['data'] ?? json) : json
+      if (receiptData && typeof receiptData === 'object') {
+        const rd = receiptData as Record<string, unknown>
+        const sale = (rd['sale'] ?? rd) as Record<string, unknown>
+        if (sale) {
+          if (sale['payment'] === undefined) sale['payment'] = payment
+          if (sale['change'] === undefined) sale['change'] = change
         }
       }
-      setReceipt(receiptData)
+      setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Offline feature temporarily removed — surface error to user
-      setError(err?.message || 'Checkout failed')
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg || 'Checkout failed')
     } finally {
       setCheckingOut(false)
     }
@@ -246,7 +279,7 @@ export default function POSPage() {
           <p className="text-gray-500">Quickly add products to the cart and checkout</p>
         </div>
         <div className="flex items-center gap-2">
-          <Input
+            <Input
             type="search"
             placeholder="Search products by name or barcode"
             value={search}
@@ -257,13 +290,14 @@ export default function POSPage() {
               const exact = products.find(p => (p.barcode && p.barcode === q) || p.name.toLowerCase() === q)
               if (exact) { addToCart(exact); setSearch(''); setSearchResults([]); }
             } }}
-            className="w-80 md:w-96 rounded-full shadow-sm ring-1 ring-gray-100 focus:ring-2 focus:ring-emerald-300"
+              className="w-full max-w-xs md:max-w-md rounded-full shadow-sm ring-1 ring-gray-100 focus:ring-2 focus:ring-emerald-300"
           />
           <Button onClick={() => setShowScanner(true)} className="ml-2">Scan</Button>
         </div>
       </div>
+      
 
-      <div className={`grid gap-6 ${isMobile ? 'grid-cols-1' : 'grid-cols-[1fr_380px]'}`}>
+      <div className="grid gap-6 grid-cols-1 md:grid-cols-[1fr_380px]">
         <div>
           <Card className="p-4 bg-white/80 backdrop-blur-sm">
             {loading ? (
@@ -353,7 +387,7 @@ export default function POSPage() {
                   </div>
 
                   <div className="mt-3">
-                    <Button onClick={handleCheckout} disabled={checkingOut || isDeviceRevoked || !isDeviceMain}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
+                    <Button onClick={handleCheckout} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
                   </div>
                 </div>
               )}
@@ -362,25 +396,28 @@ export default function POSPage() {
         )}
       </div>
       <Modal open={!!receipt} onClose={() => setReceipt(null)} title="Receipt">
-        <div className="w-80">
+        <div className="w-full max-w-md">
           <Card>
             <h3 className="mt-0 text-lg font-semibold">Receipt</h3>
             {receipt ? (() => {
-                const saleSource = receipt.sale ?? receipt
-                const itemsRaw = receipt.items ?? saleSource.items ?? []
-                const items = (itemsRaw || []).map((it: any) => ({
-                  name: it.name ?? it.product_name ?? it.product_id ?? 'Item',
-                  qty: Number(it.quantity ?? it.qty ?? 1),
-                  price: Number((it.price ?? it.unit_price ?? 0) || 0),
-                }))
-                const total = Number(saleSource.total ?? receipt.total ?? 0) || items.reduce((s: number, i: any) => s + i.qty * i.price, 0)
+                const saleSource = (receipt && ((receipt as Record<string, unknown>)['sale'] ?? receipt)) as Record<string, unknown>
+                const itemsRaw = ((receipt as Record<string, unknown>)['items'] ?? saleSource['items']) as unknown[] | undefined
+                const items = (itemsRaw || []).map((it: unknown) => {
+                  const row = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
+                  return {
+                    name: (row['name'] ?? row['product_name'] ?? row['product_id'] ?? 'Item') as string,
+                    qty: Number(row['quantity'] ?? row['qty'] ?? 1),
+                    price: Number((row['price'] ?? row['unit_price'] ?? 0) || 0),
+                  }
+                })
+                const total = Number((saleSource['total'] ?? (receipt as Record<string, unknown>)['total']) ?? 0) || items.reduce((s: number, i: { qty: number; price: number }) => s + i.qty * i.price, 0)
                 const saleObj = {
-                  id: saleSource.id ?? saleSource.sale_id ?? receipt.sale_id,
-                  created_at: saleSource.created_at ?? saleSource.createdAt ?? receipt.created_at,
+                  id: (saleSource['id'] ?? saleSource['sale_id'] ?? (receipt as Record<string, unknown>)['sale_id']) as string | undefined,
+                  created_at: (saleSource['created_at'] ?? saleSource['createdAt'] ?? (receipt as Record<string, unknown>)['created_at']) as string | undefined,
                   items,
                   total,
-                  payment: saleSource.payment ?? receipt.payment,
-                  change: saleSource.change ?? receipt.change,
+                  payment: (saleSource['payment'] ?? (receipt as Record<string, unknown>)['payment']) as number | undefined,
+                  change: (saleSource['change'] ?? (receipt as Record<string, unknown>)['change']) as number | undefined,
                 }
 
                 return (
@@ -410,14 +447,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* Device banners */}
-      {deviceCtx && deviceCtx.loading ? null : null}
-      {isDeviceRevoked && (
-        <div className="mt-3 rounded-md bg-red-50 text-red-800 p-3">This device has been revoked. Contact the account owner to restore access.</div>
-      )}
-      {!isDeviceRevoked && deviceCtx && !deviceCtx.loading && !isDeviceMain && (
-        <div className="mt-3 rounded-md bg-amber-50 text-amber-800 p-3">This device is view-only. Only the Main POS device can perform sales and stock changes.</div>
-      )}
+      {/* Device-ID banner checks removed; device-specific restrictions disabled */}
 
       {/* Floating cart button for mobile */}
       {isMobile && (
@@ -486,7 +516,7 @@ export default function POSPage() {
       )}
 
       <Modal open={showScanner} onClose={() => setShowScanner(false)} title="Scan Barcode">
-        <div className="w-[420px]">
+        <div className="w-full max-w-md">
           <Card>
             <h3 className="mt-0 text-lg font-semibold">Scan Barcode</h3>
             <div className="flex flex-col gap-2">
@@ -509,6 +539,11 @@ export default function POSPage() {
                 <Button onClick={handleManualAdd}>Add</Button>
               </div>
 
+              {/* Hidden barcode listener for keyboard scanner devices */}
+              {showScanner && scannerMode === 'keyboard' && (
+                <BarcodeScanListener enabled={showScanner} onScan={(c) => handleBarcodeDetected(c)} endKey="Enter" />
+              )}
+
               <div className="min-h-[20px]">
                 {scanError && <div className="text-red-600 text-sm">{scanError}</div>}
                 {scanMessage && <div className="text-emerald-800 text-sm">{scanMessage}</div>}
@@ -522,8 +557,67 @@ export default function POSPage() {
         </div>
       </Modal>
 
+      <Modal open={createBarcodeModalOpen} onClose={() => setCreateBarcodeModalOpen(false)} title={pendingBarcodeToCreate ? `Create product for barcode ${pendingBarcodeToCreate}` : 'Create product'}>
+        <div className="w-full max-w-md">
+          <Card>
+            <h3 className="mt-0 text-lg font-semibold">Create product and assign barcode</h3>
+            <div className="flex flex-col gap-2 mt-2">
+              <div className="text-sm text-gray-600">Barcode: <strong>{pendingBarcodeToCreate}</strong></div>
+              <Input placeholder="Product name" value={createName} onChange={e => setCreateName(e.target.value)} />
+              <Input placeholder="Price" type="number" value={createPrice} onChange={e => setCreatePrice(e.target.value)} />
+              <Input placeholder="Stock" type="number" value={createStock} onChange={e => setCreateStock(e.target.value)} />
+            </div>
+
+            <div className="mt-3 flex justify-end gap-2">
+              <Button onClick={() => setCreateBarcodeModalOpen(false)}>Cancel</Button>
+              <Button onClick={async () => {
+                const code = pendingBarcodeToCreate
+                if (!code) return
+                // attempt online create first
+                try {
+                  const payload = { code, name: createName || `Item ${code}`, price: Number(createPrice || 0), stock: Number(createStock || 0) }
+                  const _did = await getOrCreateDeviceId()
+                  const res = await fetchWithAuth('/api/products/create-with-barcode', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': _did ?? '' }, body: JSON.stringify({ ...payload, device_id: _did }) })
+                  const json = await res.json()
+                  if (!res.ok) throw new Error((json && (json as any).error) || 'Failed')
+                  // cache product and barcode
+                  try { await cacheProduct((json as any).product); await cacheBarcode(code, (json as any).product) } catch (_) {}
+                  // add to products list locally
+                  fetchProducts()
+                  setCreateBarcodeModalOpen(false)
+                } catch (err) {
+                  // offline: queue create product + barcode assignment
+                    try {
+                    const tempId = (globalThis.crypto as any)?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+                    const productPayload = { id: tempId, name: createName || `Item ${code}`, price: Number(createPrice || 0), stock: Number(createStock || 0) }
+                    await cacheProduct(productPayload)
+                    await cacheBarcode(code, productPayload)
+                    // outbox: create product then assign barcode
+                      try {
+                      const deviceId = (await getOrCreateDeviceId()) ?? undefined
+                      await addOutboxItem('create_product', { product: productPayload }, { deviceId })
+                      await addOutboxItem('assign_barcode', { code, product_id: tempId }, { deviceId })
+                    } catch (e) {
+                      // fallback: queue without deviceId
+                      await addOutboxItem('create_product', { product: productPayload })
+                      await addOutboxItem('assign_barcode', { code, product_id: tempId })
+                    }
+                    // update UI
+                    setCreateBarcodeModalOpen(false)
+                    fetchProducts()
+                  } catch (e) {
+                    console.error('Failed to queue product creation', e)
+                    setError('Failed to queue product creation')
+                  }
+                }
+              }}>Create & Assign</Button>
+            </div>
+          </Card>
+        </div>
+      </Modal>
+
       <Modal open={showPaymentModal} onClose={() => setShowPaymentModal(false)} title="Payment">
-        <div className="w-[420px]">
+        <div className="w-full max-w-md">
           <Card>
             <h3 className="mt-0 text-lg font-semibold">Payment</h3>
             <div className="mb-2">Total: <strong>{formatCurrency(computeTotal())}</strong></div>
