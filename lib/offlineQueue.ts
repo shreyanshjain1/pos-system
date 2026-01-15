@@ -19,6 +19,7 @@ const DB_NAME = 'pos_offline_v1'
 const OUTBOX_STORE = 'pos_outbox'
 const PRODUCTS_STORE = 'pos_cache_products'
 const BARCODES_STORE = 'pos_cache_barcodes'
+const LS_FALLBACK_KEY = 'pos_offbox_fallback_v1'
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -39,86 +40,163 @@ function genId() {
 }
 
 export async function addOutboxItem(actionType: string, payload: any, opts?: { deviceId?: string; shopId?: string; userId?: string; role?: string }) {
-  const db = await openDB()
-  return new Promise<string>((resolve, reject) => {
-    const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-    const store = tx.objectStore(OUTBOX_STORE)
-    const item: OutboxItem = {
-      queueId: genId(),
-      deviceId: opts?.deviceId,
-      shopId: opts?.shopId,
-      userId: opts?.userId,
-      role: opts?.role,
-      timestamp: new Date().toISOString(),
-      actionType,
-      payload,
-      retryCount: 0,
-      status: 'pending',
-      lastError: null,
+  // Try IndexedDB first, but fall back to localStorage if unavailable (e.g. strict contexts)
+  try {
+    const db = await openDB()
+    return new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
+      const store = tx.objectStore(OUTBOX_STORE)
+      const item: OutboxItem = {
+        queueId: genId(),
+        deviceId: opts?.deviceId,
+        shopId: opts?.shopId,
+        userId: opts?.userId,
+        role: opts?.role,
+        timestamp: new Date().toISOString(),
+        actionType,
+        payload,
+        retryCount: 0,
+        status: 'pending',
+        lastError: null,
+      }
+      const req = store.add(item as any)
+      req.onsuccess = () => resolve(item.queueId)
+      req.onerror = () => reject(req.error)
+    })
+  } catch (e) {
+    // fallback to localStorage
+    try {
+      const raw = localStorage.getItem(LS_FALLBACK_KEY)
+      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
+      const item: OutboxItem = {
+        queueId: genId(),
+        deviceId: opts?.deviceId,
+        shopId: opts?.shopId,
+        userId: opts?.userId,
+        role: opts?.role,
+        timestamp: new Date().toISOString(),
+        actionType,
+        payload,
+        retryCount: 0,
+        status: 'pending',
+        lastError: null,
+      }
+      arr.push(item)
+      localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(arr))
+      return item.queueId
+    } catch (le) {
+      throw le
     }
-    const req = store.add(item as any)
-    req.onsuccess = () => resolve(item.queueId)
-    req.onerror = () => reject(req.error)
-  })
+  }
 }
 
 export async function getAllOutboxItems(): Promise<OutboxItem[]> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(OUTBOX_STORE, 'readonly')
-    const store = tx.objectStore(OUTBOX_STORE)
-    const req = store.getAll()
-    req.onsuccess = () => resolve(req.result as OutboxItem[])
-    req.onerror = () => reject(req.error)
-  })
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readonly')
+      const store = tx.objectStore(OUTBOX_STORE)
+      const req = store.getAll()
+      req.onsuccess = () => resolve(req.result as OutboxItem[])
+      req.onerror = () => reject(req.error)
+    })
+  } catch (e) {
+    // localStorage fallback
+    try {
+      const raw = localStorage.getItem(LS_FALLBACK_KEY)
+      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
+      return arr
+    } catch (le) {
+      return []
+    }
+  }
 }
 
 export async function deleteOutboxItem(id: string) {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-    const store = tx.objectStore(OUTBOX_STORE)
-    const req = store.delete(id)
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
+  try {
+    const db = await openDB()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
+      const store = tx.objectStore(OUTBOX_STORE)
+      const req = store.delete(id)
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(req.error)
+    })
+  } catch (e) {
+    try {
+      const raw = localStorage.getItem(LS_FALLBACK_KEY)
+      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
+      const filtered = arr.filter(a => a.queueId !== id)
+      localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(filtered))
+      return
+    } catch (le) {
+      throw le
+    }
+  }
 }
 
 export async function updateOutboxAttempts(id: string, attempts: number) {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-    const store = tx.objectStore(OUTBOX_STORE)
-    const getReq = store.get(id)
-    getReq.onsuccess = () => {
-      const rec = getReq.result
-      if (!rec) return resolve()
-      rec.retryCount = attempts
-      const putReq = store.put(rec)
-      putReq.onsuccess = () => resolve()
-      putReq.onerror = () => reject(putReq.error)
-    }
-    getReq.onerror = () => reject(getReq.error)
-  })
+  try {
+    const db = await openDB()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
+      const store = tx.objectStore(OUTBOX_STORE)
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result
+        if (!rec) return resolve()
+        rec.retryCount = attempts
+        const putReq = store.put(rec)
+        putReq.onsuccess = () => resolve()
+        putReq.onerror = () => reject(putReq.error)
+      }
+      getReq.onerror = () => reject(getReq.error)
+    })
+  } catch (e) {
+    try {
+      const raw = localStorage.getItem(LS_FALLBACK_KEY)
+      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
+      const idx = arr.findIndex(x => x.queueId === id)
+      if (idx >= 0) {
+        arr[idx].retryCount = attempts
+        localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(arr))
+      }
+      return
+    } catch (le) { throw le }
+  }
 }
 
 export async function updateOutboxStatus(id: string, status: 'pending' | 'synced' | 'failed', lastError?: string | null) {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-    const store = tx.objectStore(OUTBOX_STORE)
-    const getReq = store.get(id)
-    getReq.onsuccess = () => {
-      const rec = getReq.result
-      if (!rec) return resolve()
-      rec.status = status
-      rec.lastError = lastError ?? null
-      const putReq = store.put(rec)
-      putReq.onsuccess = () => resolve()
-      putReq.onerror = () => reject(putReq.error)
-    }
-    getReq.onerror = () => reject(getReq.error)
-  })
+  try {
+    const db = await openDB()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
+      const store = tx.objectStore(OUTBOX_STORE)
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result
+        if (!rec) return resolve()
+        rec.status = status
+        rec.lastError = lastError ?? null
+        const putReq = store.put(rec)
+        putReq.onsuccess = () => resolve()
+        putReq.onerror = () => reject(putReq.error)
+      }
+      getReq.onerror = () => reject(getReq.error)
+    })
+  } catch (e) {
+    try {
+      const raw = localStorage.getItem(LS_FALLBACK_KEY)
+      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
+      const idx = arr.findIndex(x => x.queueId === id)
+      if (idx >= 0) {
+        arr[idx].status = status
+        arr[idx].lastError = lastError ?? null
+        localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(arr))
+      }
+      return
+    } catch (le) { throw le }
+  }
 }
 
 export async function cacheProduct(product: any) {
