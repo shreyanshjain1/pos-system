@@ -5,8 +5,9 @@ describe('deviceId service', () => {
   beforeEach(() => {
     localStorage.clear()
     // clear caches if present
-    // @ts-ignore
-    if (global.caches && global.caches.keys) {
+    // prefer @ts-expect-error to silence intentional test-only type issues
+    // @ts-expect-error - jsdom global may not include `caches`
+    if ((global as any).caches && (global as any).caches.keys) {
       // no-op in jsdom
     }
   })

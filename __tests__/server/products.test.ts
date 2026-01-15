@@ -1,3 +1,5 @@
+ 
+
 import { POST as productsPOST } from '@/app/api/products/route'
 import { NextResponse } from 'next/server'
 

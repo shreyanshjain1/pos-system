@@ -126,6 +126,17 @@ export async function cacheProduct(product: any) {
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(PRODUCTS_STORE, 'readwrite')
     const store = tx.objectStore(PRODUCTS_STORE)
+    // Ensure product has an `id` matching the store's keyPath
+    try {
+      if (!product || typeof product !== 'object') throw new Error('invalid product')
+      if (product.id === undefined || product.id === null || product.id === '') {
+        // assign temporary id so put/add won't fail when keyPath is required
+        try { product.id = (globalThis.crypto as any)?.randomUUID?.() ?? Math.random().toString(36).slice(2) } catch (_) { product.id = Math.random().toString(36).slice(2) }
+      }
+    } catch (e) {
+      return reject(e)
+    }
+
     const req = store.put(product)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)

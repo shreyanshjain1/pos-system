@@ -1,3 +1,5 @@
+ 
+
 import { POST as autoClaimPOST } from '@/app/api/shops/auto-claim/route'
 
 jest.mock('@/lib/supabase/server', () => ({

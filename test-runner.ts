@@ -1,3 +1,6 @@
+ 
+import { setup } from 'jest-dev-server'
+
 import assert from 'node:assert'
 
 // enable ts-node register when invoked via `node -r ts-node/register test-runner.ts`

@@ -1,3 +1,5 @@
+ 
+
 import { POST as checkoutPOST } from '@/app/api/checkout/route'
 
 jest.mock('@/lib/supabase/server', () => ({
