@@ -8,7 +8,7 @@ import Input from '@/components/ui/Input'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import fetchWithAuth from '@/lib/fetchWithAuth'
-import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, addPendingSale, broadcastDataUpdate } from '@/lib/offlineQueue'
+import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, broadcastDataUpdate } from '@/lib/offlineQueue'
 import OutboxModal from '@/components/pos/OutboxModal'
 import { getOrCreateDeviceId } from '@/lib/devices'
 import BarcodeScanListener from '@/components/scan/BarcodeScanListener'
@@ -158,13 +158,6 @@ export default function POSPage() {
       try { if (bc) bc.close() } catch (_) {}
       try { window.removeEventListener('storage', storageListener) } catch (_) {}
     }
-  }, [])
-
-  // Listen for receipt close event (dispatched by ThermalReceipt countdown)
-  useEffect(() => {
-    const onReceiptClose = () => { try { setReceipt(null) } catch (_) {} }
-    try { window.addEventListener('pos:receipt:close', onReceiptClose as EventListener) } catch (_) {}
-    return () => { try { window.removeEventListener('pos:receipt:close', onReceiptClose as EventListener) } catch (_) {} }
   }, [])
 
   // Device-ID based enforcement removed: allow all devices to create/checkout
@@ -323,6 +316,14 @@ export default function POSPage() {
       }
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
+      // after successful checkout, reload the page after 2s to pick up updates
+      try {
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            try { window.location.reload() } catch (_) {}
+          }, 2000)
+        }
+      } catch (_) {}
     } catch (err: unknown) {
       // If network/offline error, queue checkout for later (offline support)
       const msg = err instanceof Error ? err.message : String(err)
@@ -339,13 +340,10 @@ export default function POSPage() {
       if (isNetworkError) {
         try {
           const deviceId = (await getOrCreateDeviceId()) ?? undefined
-          // store a local pending sale record for UI/receipt purposes
-          const pendingId = await addPendingSale({ deviceId, items, total, payment_method: 'cash', payment, change })
-          // include local pending id in outbox payload so sync can remove pending sale after success
-          await addOutboxItem('checkout', { items, total, payment_method: 'cash', payment, change, _localSaleId: pendingId }, { deviceId })
+          await addOutboxItem('checkout', { items, total, payment_method: 'cash', payment, change }, { deviceId })
           // clear cart and show queued receipt
           setCart([])
-          setReceipt({ queued: true, queuedSaleId: pendingId, items, total, payment, change, queuedAt: Date.now() })
+          setReceipt({ queued: true, items, total, payment, change, queuedAt: Date.now() })
           setShowPaymentModal(false)
           setError('Offline: checkout queued and will sync when online')
           try { broadcastDataUpdate() } catch (_) {}
@@ -551,6 +549,7 @@ export default function POSPage() {
               })() : null}
 
             <div className="mt-3 flex justify-end gap-2">
+              <Button onClick={() => { setReceipt(null) }}>Close</Button>
             </div>
           </Card>
         </div>
@@ -748,7 +747,15 @@ export default function POSPage() {
 
               <div className="flex gap-2 justify-end">
               <Button onClick={() => { setShowPaymentModal(false) }}>Cancel</Button>
-              <Button onClick={async () => { try { await performCheckout(Number(paymentAmount || 0)) } catch (e) { /* noop */ } }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
+              <Button onClick={async () => {
+                  try {
+                    await performCheckout(Number(paymentAmount || 0))
+                    // wait 2s then reload to pick up updates
+                    try { if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000) } catch (_) {}
+                  } catch (e) {
+                    // performCheckout handles errors; no-op here
+                  }
+                }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
             </div>
           </Card>
         </div>
