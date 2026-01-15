@@ -1,6 +1,6 @@
 // Offline sync disabled. Provide a safe no-op export for startAutoSync.
 
-import { getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, updateOutboxStatus } from './offlineQueue'
+import { getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, updateOutboxStatus, deletePendingSale } from './offlineQueue'
 import fetchWithAuth from './fetchWithAuth'
 
 let intervalHandle: number | null = null
@@ -71,6 +71,11 @@ export async function flushOnce() {
       try {
         const res = await fetchWithAuth(endpoint, { method, headers: { 'content-type': 'application/json', 'x-device-id': it.deviceId ?? '' }, body: JSON.stringify(body) })
         if (res.ok) {
+          // if this outbox item references a local pending sale, remove it
+          try {
+            const localId = it?.payload?._localSaleId
+            if (localId) await deletePendingSale(String(localId))
+          } catch (_) {}
           await deleteOutboxItem(it.queueId)
           continue
         }

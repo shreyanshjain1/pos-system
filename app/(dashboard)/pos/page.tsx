@@ -8,7 +8,7 @@ import Input from '@/components/ui/Input'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import fetchWithAuth from '@/lib/fetchWithAuth'
-import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, broadcastDataUpdate } from '@/lib/offlineQueue'
+import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, addPendingSale, broadcastDataUpdate } from '@/lib/offlineQueue'
 import OutboxModal from '@/components/pos/OutboxModal'
 import { getOrCreateDeviceId } from '@/lib/devices'
 import BarcodeScanListener from '@/components/scan/BarcodeScanListener'
@@ -339,10 +339,13 @@ export default function POSPage() {
       if (isNetworkError) {
         try {
           const deviceId = (await getOrCreateDeviceId()) ?? undefined
-          await addOutboxItem('checkout', { items, total, payment_method: 'cash', payment, change }, { deviceId })
+          // store a local pending sale record for UI/receipt purposes
+          const pendingId = await addPendingSale({ deviceId, items, total, payment_method: 'cash', payment, change })
+          // include local pending id in outbox payload so sync can remove pending sale after success
+          await addOutboxItem('checkout', { items, total, payment_method: 'cash', payment, change, _localSaleId: pendingId }, { deviceId })
           // clear cart and show queued receipt
           setCart([])
-          setReceipt({ queued: true, items, total, payment, change, queuedAt: Date.now() })
+          setReceipt({ queued: true, queuedSaleId: pendingId, items, total, payment, change, queuedAt: Date.now() })
           setShowPaymentModal(false)
           setError('Offline: checkout queued and will sync when online')
           try { broadcastDataUpdate() } catch (_) {}

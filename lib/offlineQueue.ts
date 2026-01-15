@@ -19,16 +19,18 @@ const DB_NAME = 'pos_offline_v1'
 const OUTBOX_STORE = 'pos_outbox'
 const PRODUCTS_STORE = 'pos_cache_products'
 const BARCODES_STORE = 'pos_cache_barcodes'
+const SALES_STORE = 'pos_pending_sales'
 const LS_FALLBACK_KEY = 'pos_offbox_fallback_v1'
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1)
+    const req = indexedDB.open(DB_NAME, 2)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(OUTBOX_STORE)) db.createObjectStore(OUTBOX_STORE, { keyPath: 'queueId' })
       if (!db.objectStoreNames.contains(PRODUCTS_STORE)) db.createObjectStore(PRODUCTS_STORE, { keyPath: 'id' })
       if (!db.objectStoreNames.contains(BARCODES_STORE)) db.createObjectStore(BARCODES_STORE, { keyPath: 'code' })
+      if (!db.objectStoreNames.contains(SALES_STORE)) db.createObjectStore(SALES_STORE, { keyPath: 'id' })
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
@@ -243,7 +245,99 @@ export async function lookupBarcodeCached(code: string): Promise<any | null> {
   })
 }
 
-export default { addOutboxItem, getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, cacheProduct, cacheBarcode, lookupBarcodeCached }
+// Pending sales helpers: store receipts/sales locally so POS can show queued receipts
+type PendingSale = {
+  id: string
+  deviceId?: string
+  shopId?: string
+  timestamp: string
+  items: any[]
+  total: number
+  payment_method?: string
+  payment?: number
+  change?: number
+  status?: 'pending' | 'synced' | 'failed'
+}
+
+export async function addPendingSale(payload: { deviceId?: string; shopId?: string; items: any[]; total: number; payment_method?: string; payment?: number; change?: number }) {
+  const sale: PendingSale = {
+    id: genId(),
+    deviceId: payload.deviceId,
+    shopId: payload.shopId,
+    timestamp: new Date().toISOString(),
+    items: payload.items,
+    total: payload.total,
+    payment_method: payload.payment_method,
+    payment: payload.payment,
+    change: payload.change,
+    status: 'pending',
+  }
+
+  try {
+    const db = await openDB()
+    return new Promise<string>((resolve, reject) => {
+      const tx = db.transaction(SALES_STORE, 'readwrite')
+      const store = tx.objectStore(SALES_STORE)
+      const req = store.add(sale as any)
+      req.onsuccess = () => resolve(sale.id)
+      req.onerror = () => reject(req.error)
+    })
+  } catch (e) {
+    // fallback to localStorage under a separate key
+    try {
+      const key = 'pos_pending_sales_fallback_v1'
+      const raw = localStorage.getItem(key)
+      const arr: PendingSale[] = raw ? JSON.parse(raw) : []
+      arr.push(sale)
+      localStorage.setItem(key, JSON.stringify(arr))
+      return sale.id
+    } catch (le) { throw le }
+  }
+}
+
+export async function getPendingSales(): Promise<PendingSale[]> {
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(SALES_STORE, 'readonly')
+      const store = tx.objectStore(SALES_STORE)
+      const req = store.getAll()
+      req.onsuccess = () => resolve(req.result as PendingSale[])
+      req.onerror = () => reject(req.error)
+    })
+  } catch (e) {
+    try {
+      const key = 'pos_pending_sales_fallback_v1'
+      const raw = localStorage.getItem(key)
+      const arr: PendingSale[] = raw ? JSON.parse(raw) : []
+      return arr
+    } catch (le) { return [] }
+  }
+}
+
+export async function deletePendingSale(id: string) {
+  try {
+    const db = await openDB()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(SALES_STORE, 'readwrite')
+      const store = tx.objectStore(SALES_STORE)
+      const req = store.delete(id)
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(req.error)
+    })
+  } catch (e) {
+    try {
+      const key = 'pos_pending_sales_fallback_v1'
+      const raw = localStorage.getItem(key)
+      const arr: any[] = raw ? JSON.parse(raw) : []
+      const filtered = arr.filter(a => a.id !== id)
+      localStorage.setItem(key, JSON.stringify(filtered))
+      return
+    } catch (le) { throw le }
+  }
+}
+
+export default { addOutboxItem, getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, updateOutboxStatus, cacheProduct, cacheBarcode, lookupBarcodeCached, addPendingSale, getPendingSales, deletePendingSale }
 
 // Broadcast update helper: notifies other tabs/clients that products/sales changed
 export function broadcastDataUpdate() {
