@@ -28,7 +28,14 @@ export default async function Page() {
         </div>
       </main>
     )
-  } catch (err) {
+  } catch (err: any) {
+    // Next.js uses special thrown values (e.g. NEXT_REDIRECT) to signal
+    // redirects during SSR / build. If we catch and log them here it
+    // creates noisy build-time errors. Re-throw any Next-specific
+    // control-flow signals and handle only real errors below.
+    if (err && typeof err === 'object' && 'digest' in err && String(err.digest).startsWith('NEXT_')) {
+      throw err
+    }
     console.error('onboarding/choose-type error', err)
     return redirect('/login')
   }

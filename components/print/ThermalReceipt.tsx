@@ -202,7 +202,7 @@ export default function ThermalReceipt({ sale }: { sale: Sale }) {
         if (typeof window !== 'undefined') {
           setTimeout(() => {
             try { window.location.reload() } catch (_) {}
-          }, 2000)
+          }, 1000)
         }
       } catch (_) {}
     }, 300)

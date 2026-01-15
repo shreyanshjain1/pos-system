@@ -316,12 +316,12 @@ export default function POSPage() {
       }
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
-      // after successful checkout, reload the page after 2s to pick up updates
+      // after successful checkout, reload the page after 1s to pick up updates
       try {
         if (typeof window !== 'undefined') {
           setTimeout(() => {
             try { window.location.reload() } catch (_) {}
-          }, 2000)
+          }, 1000)
         }
       } catch (_) {}
     } catch (err: unknown) {

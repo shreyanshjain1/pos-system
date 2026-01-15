@@ -150,7 +150,7 @@ export default function ProductsPage() {
       fetchList()
       // reload after create so other UI reflects changes (give server a moment)
       try {
-        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
+        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 1000)
       } catch (_) {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -192,7 +192,7 @@ export default function ProductsPage() {
       fetchList()
       // reload after update to ensure UI reflects server state
       try {
-        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
+        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 1000)
       } catch (_) {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -219,7 +219,7 @@ export default function ProductsPage() {
       if (editing?.id === id) cancelEdit()
       // reload after delete so other views refresh
       try {
-        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
+        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 1000)
       } catch (_) {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
