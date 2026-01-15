@@ -8,7 +8,7 @@ import Input from '@/components/ui/Input'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import fetchWithAuth from '@/lib/fetchWithAuth'
-import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem } from '@/lib/offlineQueue'
+import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, broadcastDataUpdate } from '@/lib/offlineQueue'
 import { getOrCreateDeviceId } from '@/lib/devices'
 import BarcodeScanListener from '@/components/scan/BarcodeScanListener'
 import ThermalReceipt from '@/components/print/ThermalReceipt'
@@ -92,6 +92,32 @@ export default function POSPage() {
       try { if (pollTimerRef.current) window.clearInterval(pollTimerRef.current) } catch (_) {}
       try { window.removeEventListener('pos:settings:updated', () => {}) } catch (_) {}
       try { window.removeEventListener('resize', checkMobile) } catch (_) {}
+      try { if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('pos-updates')
+        bc.close()
+      } } catch (_) {}
+      try { window.removeEventListener('storage', () => {}) } catch (_) {}
+    }
+  }, [])
+
+  // Listen for updates from other tabs/clients and refresh products
+  useEffect(() => {
+    let bc: BroadcastChannel | null = null
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('pos-updates')
+        bc.onmessage = () => { fetchProducts({ skipLoading: true }) }
+      }
+    } catch (_) { bc = null }
+
+    const storageListener = (e: StorageEvent) => {
+      if (e.key === 'pos:data-updated') fetchProducts({ skipLoading: true })
+    }
+    try { window.addEventListener('storage', storageListener) } catch (_) {}
+
+    return () => {
+      try { if (bc) bc.close() } catch (_) {}
+      try { window.removeEventListener('storage', storageListener) } catch (_) {}
     }
   }, [])
 
@@ -235,6 +261,7 @@ export default function POSPage() {
       // success: clear cart and refresh products
       setCart([])
       fetchProducts()
+      try { broadcastDataUpdate() } catch (_) {}
       // attach payment and change to receipt for display if backend doesn't include them
       const receiptData: unknown = typeof json === 'object' && json !== null ? ((json as Record<string, unknown>)['data'] ?? json) : json
       if (receiptData && typeof receiptData === 'object') {
@@ -584,6 +611,7 @@ export default function POSPage() {
                   try { await cacheProduct((json as any).product); await cacheBarcode(code, (json as any).product) } catch (_) {}
                   // add to products list locally
                   fetchProducts()
+                  try { broadcastDataUpdate() } catch (_) {}
                   setCreateBarcodeModalOpen(false)
                 } catch (err) {
                   // offline: queue create product + barcode assignment
@@ -605,6 +633,7 @@ export default function POSPage() {
                     // update UI
                     setCreateBarcodeModalOpen(false)
                     fetchProducts()
+                    try { broadcastDataUpdate() } catch (_) {}
                   } catch (e) {
                     console.error('Failed to queue product creation', e)
                     setError('Failed to queue product creation')

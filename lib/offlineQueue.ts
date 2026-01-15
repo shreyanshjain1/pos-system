@@ -155,3 +155,21 @@ export async function lookupBarcodeCached(code: string): Promise<any | null> {
 }
 
 export default { addOutboxItem, getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, cacheProduct, cacheBarcode, lookupBarcodeCached }
+
+// Broadcast update helper: notifies other tabs/clients that products/sales changed
+export function broadcastDataUpdate() {
+  try {
+    // use BroadcastChannel when available
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('pos-updates')
+      bc.postMessage({ type: 'data-updated', at: Date.now() })
+      bc.close()
+      return
+    }
+  } catch (_) {}
+
+  // fallback: use localStorage event
+  try {
+    localStorage.setItem('pos:data-updated', String(Date.now()))
+  } catch (_) {}
+}
