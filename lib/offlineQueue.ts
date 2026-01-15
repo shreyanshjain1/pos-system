@@ -61,7 +61,8 @@ export async function addOutboxItem(actionType: string, payload: any, opts?: { d
         status: 'pending',
         lastError: null,
       }
-      const req = store.add(item as any)
+      // use put (upsert) which is more resilient than add when keyPath issues occur
+      const req = store.put(item as any)
       req.onsuccess = () => resolve(item.queueId)
       req.onerror = () => reject(req.error)
     })
@@ -278,7 +279,8 @@ export async function addPendingSale(payload: { deviceId?: string; shopId?: stri
     return new Promise<string>((resolve, reject) => {
       const tx = db.transaction(SALES_STORE, 'readwrite')
       const store = tx.objectStore(SALES_STORE)
-      const req = store.add(sale as any)
+      // use put to avoid errors if the key already exists or keyPath handling is quirky
+      const req = store.put(sale as any)
       req.onsuccess = () => resolve(sale.id)
       req.onerror = () => reject(req.error)
     })
