@@ -316,6 +316,14 @@ export default function POSPage() {
       }
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
+      // after successful checkout, reload the page after 2s to pick up updates
+      try {
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            try { window.location.reload() } catch (_) {}
+          }, 2000)
+        }
+      } catch (_) {}
     } catch (err: unknown) {
       // If network/offline error, queue checkout for later (offline support)
       const msg = err instanceof Error ? err.message : String(err)
@@ -737,9 +745,17 @@ export default function POSPage() {
 
             <div className="mb-3">Change: <strong>{paymentAmount ? formatCurrency(Math.max(0, Number(paymentAmount) - computeTotal())) : formatCurrency(0)}</strong></div>
 
-            <div className="flex gap-2 justify-end">
+              <div className="flex gap-2 justify-end">
               <Button onClick={() => { setShowPaymentModal(false) }}>Cancel</Button>
-              <Button onClick={() => performCheckout(Number(paymentAmount || 0))} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
+              <Button onClick={async () => {
+                  try {
+                    await performCheckout(Number(paymentAmount || 0))
+                    // wait 2s then reload to pick up updates
+                    try { if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000) } catch (_) {}
+                  } catch (e) {
+                    // performCheckout handles errors; no-op here
+                  }
+                }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
             </div>
           </Card>
         </div>

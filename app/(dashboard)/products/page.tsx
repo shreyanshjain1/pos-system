@@ -148,6 +148,10 @@ export default function ProductsPage() {
       setBarcode('')
       if (isMobile) setShowCreateModal(false)
       fetchList()
+      // reload after create so other UI reflects changes (give server a moment)
+      try {
+        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
+      } catch (_) {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Create failed')
@@ -186,6 +190,10 @@ export default function ProductsPage() {
       if (isMobile) setShowEditModal(false)
       cancelEdit()
       fetchList()
+      // reload after update to ensure UI reflects server state
+      try {
+        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
+      } catch (_) {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Update failed')
@@ -209,6 +217,10 @@ export default function ProductsPage() {
       // remove from UI optimistically instead of refetching list
       setProducts(prev => prev.filter(p => p.id !== id))
       if (editing?.id === id) cancelEdit()
+      // reload after delete so other views refresh
+      try {
+        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
+      } catch (_) {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Delete failed')
