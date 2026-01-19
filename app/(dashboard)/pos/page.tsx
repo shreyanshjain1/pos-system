@@ -400,10 +400,6 @@ export default function POSPage() {
         throw new Error((errMsg as string) || 'Checkout failed')
       }
 
-      // success: clear cart and refresh products
-      setCart([])
-      fetchProducts()
-
       // attach payment and change to receipt for display if backend doesn't include them
       const receiptData: unknown = typeof json === 'object' && json !== null ? ((json as Record<string, unknown>)['data'] ?? json) : json
       if (receiptData && typeof receiptData === 'object') {
@@ -416,10 +412,11 @@ export default function POSPage() {
       }
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
-      // no forced reload — UI refreshed via fetchProducts and realtime/polling
+      setCart([])
+      fetchProducts()
+      // UI refreshed via fetchProducts and realtime/polling
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      
       // If offline, queue the transaction for later sync
       if (!isOnline) {
         try {
@@ -428,8 +425,9 @@ export default function POSPage() {
           setPaymentError('No internet connection. Transaction queued and will sync when online.')
           // Apply local stock decrement to prevent overselling while offline
           applyLocalStockAdjustments(items)
-          setCart([])
+          setReceipt({ items, total, payment, change, offline: true })
           setShowPaymentModal(false)
+          setCart([])
         } catch (queueErr) {
           setPaymentError('Failed to queue transaction: ' + (queueErr instanceof Error ? queueErr.message : String(queueErr)))
           // Keep cart intact on error - don't clear
@@ -687,7 +685,8 @@ export default function POSPage() {
               })() : null}
 
               <div className="mt-3 flex justify-end gap-2">
-                <Button onClick={() => { setReceipt(null) }}>Close</Button>
+                <Button onClick={() => window.print()} variant="primary">Print receipt</Button>
+                <Button onClick={() => { setReceipt(null) }} variant="secondary">Close</Button>
               </div>
             </Card>
           </SectionErrorBoundary>
@@ -911,8 +910,12 @@ export default function POSPage() {
           <Card>
             <h3 className="mt-0 text-lg font-semibold">Payment</h3>
             <div className="mb-2">Total: <strong>{formatCurrency(computeTotal())}</strong></div>
-
-            <div className="mb-3">              <div className="text-sm mb-2">Amount paid</div>
+            {/* Show default device for checkout */}
+            <div className="mb-2 text-sm text-gray-600">
+              Default device: <strong>{settings.defaultDevice ? settings.defaultDevice.charAt(0).toUpperCase() + settings.defaultDevice.slice(1) : 'Not set'}</strong>
+            </div>
+            <div className="mb-3">
+              <div className="text-sm mb-2">Amount paid</div>
               <Input
                 type="number"
                 inputMode="decimal"
@@ -922,19 +925,17 @@ export default function POSPage() {
               />
               {paymentError && <div className="text-red-600 text-sm mt-1">{paymentError}</div>}
             </div>
-
             <div className="mb-3">Change: <strong>{paymentAmount ? formatCurrency(Math.max(0, Number(paymentAmount) - computeTotal())) : formatCurrency(0)}</strong></div>
-
-              <div className="flex gap-2 justify-end">
+            <div className="flex gap-2 justify-end">
               <Button onClick={() => { setShowPaymentModal(false); setPaymentError(null) }}>Cancel</Button>
               <Button onClick={async () => {
-                  try {
-                    await performCheckout(Number(paymentAmount || 0))
-                    // Do not force a full-page reload; UI is updated via fetchProducts/realtime
-                  } catch (e) {
-                    // performCheckout handles errors; no-op here
-                  }
-                }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
+                try {
+                  await performCheckout(Number(paymentAmount || 0))
+                  // Do not force a full-page reload; UI is updated via fetchProducts/realtime
+                } catch (e) {
+                  // performCheckout handles errors; no-op here
+                }
+              }} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Confirm & Print'}</Button>
             </div>
           </Card>
         </div>

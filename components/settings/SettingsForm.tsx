@@ -159,6 +159,20 @@ export default function SettingsForm() {
   return (
     <form onSubmit={handleSave} className="grid gap-4 bg-white rounded-xl p-6 shadow-sm border border-gray-100">
       <label className="block">
+              <label className="block">
+                <div className="text-xs text-slate-700 mb-2">Default device for checkout</div>
+                <select
+                  value={settings.defaultDevice || ''}
+                  onChange={e => update('defaultDevice', e.target.value)}
+                  className="w-40 px-3 py-2 rounded-lg border border-gray-200 bg-white"
+                >
+                  <option value="">Select device</option>
+                  <option value="phone">Phone</option>
+                  <option value="tablet">Tablet</option>
+                  <option value="desktop">Desktop</option>
+                </select>
+                <div className="text-xs text-gray-500 mt-2">This device will be used by default for checkout actions.</div>
+              </label>
         <div className="text-xs text-gray-700 mb-2">Store name</div>
         <input
           value={settings.storeName}
@@ -231,13 +245,21 @@ export default function SettingsForm() {
 
       <label className="block">
         <div className="text-xs text-slate-700 mb-2">Preferred printer (optional)</div>
-        <input
-          value={settings.preferredPrinter || ''}
-          onChange={e => update('preferredPrinter', e.target.value)}
-          placeholder="Printer name (for reference)"
-          className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white"
-        />
-        <div className="text-xs text-gray-500 mt-2">Note: the browser print dialog controls the actual printer selection. This field is saved for convenience.</div>
+        <div className="flex gap-2 items-center">
+          <input
+            value={settings.preferredPrinter || ''}
+            onChange={e => update('preferredPrinter', e.target.value)}
+            placeholder="Printer name (for reference)"
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white"
+          />
+          <button
+            type="button"
+            className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm"
+            onClick={() => window.print()}
+            title="Open print dialog to select printer"
+          >Choose Printer</button>
+        </div>
+        <div className="text-xs text-gray-500 mt-2">Actual printer selection is handled by your device/browser when printing. This field is for reference only.</div>
       </label>
 
       <label className="block">
