@@ -43,6 +43,8 @@ export default function SupplyPage() {
   }, [])
 
   const planIsBasic = plan === 'basic'
+  const planIsPro = plan === 'pro'
+  const planIsAdvanced = plan === 'advance' || plan === 'advanced'
 
   const fetchProducts = async () => {
     setLoadingProducts(true)
@@ -148,9 +150,9 @@ export default function SupplyPage() {
     }
   }
 
+  // Only available for Advanced plan
   const handleBuyForMe = async () => {
-    if (selectedItems.size === 0) return
-    
+    if (!planIsAdvanced || selectedItems.size === 0) return
     setRestocking(true)
     try {
       const orders = Array.from(selectedItems.entries()).map(([productId, quantity]) => {
@@ -162,7 +164,6 @@ export default function SupplyPage() {
           cost: Number(product?.cost ?? 0)
         }
       })
-
       const response = await fetchWithAuth('/api/supply-orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -172,14 +173,11 @@ export default function SupplyPage() {
           deliveryFee
         })
       })
-
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.error || 'Order failed')
       }
-
       setSelectedItems(new Map())
-      // Show payment modal instead of alert
       setPaymentModal({ isOpen: true, amount: `₱${grandTotal.toFixed(2)}` })
     } catch (e) {
       console.error('Failed to place order', e)
@@ -484,18 +482,22 @@ export default function SupplyPage() {
                       <span className="text-stone-600">Subtotal:</span>
                       <span className="font-semibold text-stone-900">₱{totalCost.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-600">Service Fee (5%):</span>
-                      <span className="font-semibold text-stone-900">₱{serviceFee.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-600">Delivery Fee:</span>
-                      <span className="font-semibold text-stone-900">₱{deliveryFee.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between pt-2 border-t border-emerald-300">
-                      <span className="font-semibold text-stone-900">Total:</span>
-                      <span className="text-xl font-bold text-emerald-700">₱{grandTotal.toFixed(2)}</span>
-                    </div>
+                    {planIsAdvanced && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-stone-600">Service Fee (5%):</span>
+                          <span className="font-semibold text-stone-900">₱{serviceFee.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-stone-600">Delivery Fee:</span>
+                          <span className="font-semibold text-stone-900">₱{deliveryFee.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t border-emerald-300">
+                          <span className="font-semibold text-stone-900">Total:</span>
+                          <span className="text-xl font-bold text-emerald-700">₱{grandTotal.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -511,27 +513,44 @@ export default function SupplyPage() {
                   </svg>
                   Update Stock Only
                 </button>
-                
-                <button
-                  onClick={handleBuyForMe}
-                  disabled={totalItems === 0 || restocking}
-                  className="px-4 sm:px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-amber-600 hover:to-amber-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm sm:text-base whitespace-nowrap"
-                >
-                  {restocking ? (
-                    <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                      <span className="hidden sm:inline">Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      <span>Buy for Me</span>
-                      <span className="hidden sm:inline">• ₱{grandTotal.toFixed(2)}</span>
-                    </>
+                <div className="relative group">
+                  <button
+                    onClick={planIsAdvanced ? handleBuyForMe : undefined}
+                    disabled={totalItems === 0 || restocking || !planIsAdvanced}
+                    className={
+                      `px-4 sm:px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-amber-600 hover:to-amber-700 transition-all flex items-center justify-center gap-2 text-sm sm:text-base whitespace-nowrap ` +
+                      (totalItems === 0 || restocking || !planIsAdvanced ? 'opacity-50 cursor-not-allowed' : '')
+                    }
+                    type="button"
+                  >
+                    {restocking ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        <span className="hidden sm:inline">Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        <span>Buy for Me</span>
+                        {planIsAdvanced && (
+                          <span className="hidden sm:inline">• ₱{grandTotal.toFixed(2)}</span>
+                        )}
+                        {!planIsAdvanced && (
+                          <span className="ml-2 text-xs text-amber-100 bg-amber-600 rounded px-2 py-0.5">Advanced only</span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                  {/* Tooltip for disabled state (Pro) */}
+                  {!planIsAdvanced && (
+                    <div className="absolute left-1/2 z-20 -translate-x-1/2 mt-2 w-64 bg-stone-900 text-white text-xs rounded-lg shadow-lg px-4 py-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-events-none transition-opacity duration-200 select-none">
+                      <div className="font-semibold mb-1">Available on Advanced</div>
+                      <div>We handle purchasing &amp; delivery for you</div>
+                    </div>
                   )}
-                </button>
+                </div>
               </div>
             </div>
           </motion.div>
