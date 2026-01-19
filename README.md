@@ -45,9 +45,6 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Barcode scanning & Offline checklist
+## Barcode scanning
 
-- **Scan barcode adds to cart:** On the POS page, enable scanner mode and scan a barcode. If the barcode exists in the offline cache or backend, it is added to the cart.
-- **Unknown barcode create+assign (authoritative device):** When the main/authoritative device scans an unknown barcode, a modal allows creating a new product and assigning the barcode. When offline this action is queued in the outbox and cached locally.
-- **Read-only device restrictions:** Non-authoritative devices can scan and add found products to their view-only cart, but cannot create/assign barcodes or perform checkout.
-- **Offline authoritative flow:** Authoritative device can create product+barcode while offline; action is queued and will sync later. Temporary IDs are used for local cache until sync.
+- **Scan barcode adds to cart:** On the POS page, enable scanner mode and scan a barcode. If the barcode exists in the backend it is added to the cart.

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
 import { getSubscriptionStatus } from '@/lib/subscription'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 type SupabaseAuthLike = { getUser: (token: string) => Promise<{ data?: unknown; error?: unknown }> }
 type SupabaseUserData = { user?: { id?: string; email?: string } }
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
       console.warn('Products: subscription check error', e)
     }
 
-    let query = supabaseAdmin.from('products').select('id, name, price, stock, barcode, created_at').order('created_at', { ascending: false })
+    let query = supabaseAdmin.from('products').select('id, name, price, cost, stock, barcode, min_stock, max_stock, images, sku, shop_id, created_at').order('created_at', { ascending: false })
     query = query.in('shop_id', shopIds)
     const { data, error } = await query
     if (error) throw error
@@ -63,6 +64,16 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   // Handle product creation
   try {
+    // Rate limiting: max 60 product creates per minute per IP
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown'
+    const rateCheck = checkRateLimit(ip, 60, 60 * 1000)
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)) } }
+      )
+    }
+
     const body: unknown = await req.json()
     console.error('[Products POST] incoming body:', body)
     if (typeof body !== 'object' || body === null) return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
@@ -83,13 +94,14 @@ export async function POST(req: Request) {
     // Validate caller and determine shop to assign
     const authHeader = req.headers.get('authorization') || ''
     let assignedShopId: string | null = null
+    let callerUserId: string | null = null
     if (authHeader.startsWith('Bearer ')) {
       const accessToken = authHeader.split(' ')[1]
       try {
         const { data: authData, error: authErr } = await (supabaseAdmin.auth as unknown as SupabaseAuthLike).getUser(accessToken)
         if (!authErr && (authData as unknown as SupabaseUserData)?.user?.id) {
-          const userId = (authData as unknown as SupabaseUserData)?.user?.id as string
-          const { data: mappings } = await supabaseAdmin.from('user_shops').select('shop_id').eq('user_id', userId).limit(1)
+          callerUserId = (authData as unknown as SupabaseUserData)?.user?.id as string
+          const { data: mappings } = await supabaseAdmin.from('user_shops').select('shop_id').eq('user_id', callerUserId).limit(1)
           if (mappings && (mappings as unknown[]).length > 0) assignedShopId = ((mappings as unknown as Array<{ shop_id?: string }>)[0].shop_id) ?? null
         }
       } catch (e) {
@@ -102,12 +114,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No shop mapping for user' }, { status: 403 })
     }
 
+    // Enforce retail subscription for the authenticated user (cashier/shop owner)
+    try {
+      if (!callerUserId) return NextResponse.json({ error: 'Missing authentication' }, { status: 401 })
+      const status = await getSubscriptionStatus(supabaseAdmin, callerUserId)
+      if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+      if ((String(status.pos_type || '').toLowerCase()) !== 'retail') return NextResponse.json({ error: 'Not a retail subscription' }, { status: 403 })
+    } catch (e) {
+      console.warn('Products POST: subscription check error', e)
+      return NextResponse.json({ error: 'Subscription check error' }, { status: 500 })
+    }
+
     // Enforce device authorization for staff accounts. Expect client to send device id
     const deviceIdFromHeader = req.headers.get('x-device-id') || null
     const deviceIdFromBody = (body as Record<string, unknown>)?.deviceId as string | undefined
     const deviceId = deviceIdFromBody ?? deviceIdFromHeader
 
-    const insertPayload: Record<string, unknown> = { name, price: priceNum, stock: stockNum, barcode, shop_id: assignedShopId }
+    const insertPayload: Record<string, unknown> = { name, price: priceNum, cost: Number((body as any).cost || 0) || 0, stock: stockNum, min_stock: Number((body as any).min_stock || 0) || 0, max_stock: Number((body as any).max_stock || null) || null, sku: (body as any).sku ?? null, images: (body as any).images ?? [], barcode, shop_id: assignedShopId }
 
     const { enforceDeviceWritePermission } = await import('@/lib/deviceAuth')
     try {
@@ -117,8 +140,7 @@ export async function POST(req: Request) {
       if (!check.allowed) {
         return NextResponse.json({ error: check.reason || 'forbidden' }, { status: 403 })
       }
-      // Attach deviceId to row for audit
-      if (deviceId) (insertPayload as any).device_id = deviceId
+      // Do not attach device_id to product rows — device table removed
     } catch (e) {
       // proceed conservatively
       return NextResponse.json({ error: 'authorization_error' }, { status: 403 })
@@ -128,8 +150,18 @@ export async function POST(req: Request) {
       if (insertPayload[k] === 'undefined') insertPayload[k] = null
     }
     console.error('[Products POST] insertPayload:', insertPayload)
-    const { data, error } = await supabaseAdmin.from('products').insert([insertPayload]).select('id, name, price, stock, barcode, created_at').single()
-    if (error) throw error
+    const { data, error } = await supabaseAdmin.from('products').insert([insertPayload]).select('id, name, price, cost, stock, barcode, min_stock, max_stock, images, sku, shop_id, created_at').single()
+    if (error) {
+      // handle unique constraint on barcode
+      try {
+        const code = (error as any)?.code || (error as any)?.statusCode
+        const msg = String((error as any)?.message || '')
+        if (code === '23505' || /unique/i.test(msg)) {
+          return NextResponse.json({ error: 'Barcode already exists for this shop' }, { status: 400 })
+        }
+      } catch (_) {}
+      throw error
+    }
     return NextResponse.json({ data }, { status: 201 })
   } catch (err: unknown) {
     console.error('Products POST error', err)

@@ -2,11 +2,16 @@
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
 import { useSidebar } from './SidebarContext'
+import { usePathname } from 'next/navigation'
+import { motion, AnimatePresence } from 'framer-motion'
+import { sidebarItemVariants, listItem, staggerContainer, transitions } from '@/lib/motion'
+import { supabase } from '@/lib/supabase/client'
+import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
 type NavItem = { href: string; label: string; icon?: React.ReactNode }
 
 const ICON = (path: React.ReactNode) => (
-  <span className="nav-icon" aria-hidden style={{display: 'inline-flex', width: 20, height: 20}}>{path}</span>
+  <span className="nav-icon" aria-hidden style={{display: 'inline-flex', width: 16, height: 16}}>{path}</span>
 )
 
 const NAV: NavItem[] = [
@@ -30,21 +35,24 @@ const NAV: NavItem[] = [
       <path d="M12 2v20" />
     </svg>
   ) },
-  { href: '/barcodes', label: 'Barcodes', icon: ICON(
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false">
-      <path d="M2 6h2v12H2zM6 6h2v12H6zM10 6h8v12h-8z" />
-    </svg>
-  ) },
   { href: '/sales', label: 'Sales History', icon: ICON(
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false">
       <path d="M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0z" />
       <path d="M12 7v6l4 2" />
     </svg>
   ) },
-  { href: '/settings', label: 'Settings', icon: ICON(
+  { href: '/reports', label: 'Reports', icon: ICON(
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false">
-      <path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 0 1 2.28 16.9l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09c.7 0 1.3-.4 1.51-1a1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 0 1 6.1 2.28l.06.06c.5.5 1.2.72 1.82.33.54-.33 1.2-.33 1.82 0 .62.39 1.32.17 1.82-.33l.06-.06A2 2 0 0 1 14 2.28l.06.06c.5.5 1.2.72 1.82.33.54-.33 1.2-.33 1.82 0 .62.39 1.32.17 1.82-.33l.06-.06A2 2 0 0 1 21.72 7.1l-.06.06c-.5.5-.72 1.2-.33 1.82.33.54.33 1.2 0 1.82-.39.62-.17 1.32.33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06c-.5-.5-.72-1.2-.33-1.82.33-.54.33-1.2 0-1.82-.39-.62-.17-1.32.33-1.82l.06-.06A2 2 0 0 1 19.4 15z" />
+      <path d="M3 3v18h18" />
+      <path d="M7 14v4" />
+      <path d="M12 10v8" />
+      <path d="M17 6v12" />
+    </svg>
+  ) },
+  { href: '/plans', label: 'Plans', icon: ICON(
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false">
+      <path d="M3 7h18v4H3z" />
+      <path d="M3 13h18v4H3z" />
     </svg>
   ) },
 ]
@@ -52,7 +60,14 @@ const NAV: NavItem[] = [
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [subscription, setSubscription] = useState<{ active?: boolean; plan?: string | null; pos_type?: string | null } | null>(null)
+  const [subscriptionPlan, setSubscriptionPlan] = useState<string | null>(null)
+  const [subscriptionActive, setSubscriptionActive] = useState<boolean>(true)
+  const [isOwner, setIsOwner] = useState(false)
   const { mobileOpen, setMobileOpen } = useSidebar()
+  const pathname = usePathname() || '/'
+
+  const OWNER_EMAIL = 'raymart.leyson.rl@gmail.com'
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar-collapsed')
@@ -63,12 +78,33 @@ export default function Sidebar() {
     let mounted = true
     ;(async () => {
       try {
-        const m = await import('@/lib/supabase/client')
-        const res = await m.supabase.auth.getSession()
-        const sessObj = res as unknown as { data?: { session?: { user?: { email?: string } } } }
-        const session = sessObj.data?.session
+        const { data } = await supabase.auth.getSession()
+        const session = (data as { session?: { user?: { email?: string } } } | undefined)?.session
         if (!mounted) return
-        setUserEmail(session?.user?.email ?? null)
+        const email = session?.user?.email ?? null
+        setUserEmail(email)
+        setIsOwner(email?.toLowerCase().trim() === OWNER_EMAIL.toLowerCase())
+      } catch (err) {
+        // ignore
+      }
+    })()
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const subRes = await fetchWithAuth('/api/subscription')
+        if (subRes.ok && mounted) {
+          const sj = await subRes.json().catch(() => ({}))
+          // normalize plan and active flag (same as POS page)
+          const planRaw = (sj?.plan ?? null)
+          const plan = planRaw ? String(planRaw).toLowerCase() : null
+          setSubscriptionPlan(plan === 'advanced' ? 'advance' : plan)
+          setSubscriptionActive(Boolean(sj?.active))
+          setSubscription(sj)
+        }
       } catch (_) {
         // ignore
       }
@@ -80,45 +116,93 @@ export default function Sidebar() {
     localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0')
   }, [collapsed])
 
+  useEffect(() => {
+    // auto-close mobile drawer on route change to avoid lingering overlays
+    if (mobileOpen) setMobileOpen(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
+
   const navContent = (
     <>
-      <div className="px-4 py-5 flex items-center justify-between">
-        <div onClick={() => setCollapsed(v => !v)} className="flex items-center gap-3 cursor-pointer">
-          <div className="w-10 h-10 bg-indigo-600 text-white rounded-md flex items-center justify-center font-bold">R</div>
-          {!collapsed && <span className="font-semibold text-slate-900">RNL POS</span>}
-        </div>
+      <div className="px-4 py-5 flex items-center justify-between border-b border-stone-200">
+            <motion.div 
+              onClick={() => setCollapsed(v => !v)} 
+              className="flex items-center gap-3 cursor-pointer"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              transition={transitions.fast}
+            >
+              <div className="w-9 h-9 bg-gradient-to-br from-emerald-600 to-emerald-700 text-white rounded-xl flex items-center justify-center font-bold text-sm shadow-sm">R</div>
+              {!collapsed && <span className="font-semibold text-stone-900 text-base">RNL POS</span>}
+            </motion.div>
         {mobileOpen && (
-          <button className="p-2 rounded-md hover:bg-gray-100" aria-label="Close menu" onClick={() => setMobileOpen(false)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="#374151" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
+          <motion.button 
+            className="p-2 rounded-lg hover:bg-stone-100 transition-colors" 
+            aria-label="Close menu" 
+            onClick={() => setMobileOpen(false)}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M6 18L18 6" stroke="#57534e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </motion.button>
         )}
       </div>
 
-      <nav className="flex-1 overflow-auto px-2 py-4">
-        <ul className="space-y-1">
-          {NAV.map(item => (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                className={`flex items-center gap-3 w-full text-sm text-slate-700 hover:bg-gray-50 rounded-md px-3 py-2 ${collapsed ? 'justify-center' : ''}`}
-                aria-label={item.label}
-                title={item.label}
-              >
-                <span className="w-5 h-5 text-slate-600">{item.icon}</span>
-                {!collapsed && <span className="truncate">{item.label}</span>}
-              </Link>
-            </li>
-          ))}
+      <nav className="flex-1 overflow-auto px-3 py-4">
+        <motion.ul 
+          className="space-y-1"
+          variants={staggerContainer}
+          initial="hidden"
+          animate="visible"
+        >
+          {NAV.map(item => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+            return (
+              <motion.li key={item.href} variants={listItem}>
+                <Link
+                  href={item.href}
+                  className={`flex items-center gap-3 w-full text-sm rounded-xl px-3 py-2.5 relative transition-colors ${
+                    isActive 
+                      ? 'text-emerald-700 font-medium' 
+                      : 'text-stone-600 hover:text-stone-900'
+                  } ${collapsed ? 'justify-center' : ''}`}
+                  aria-label={item.label}
+                  title={item.label}
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute inset-0 bg-emerald-50 rounded-xl border border-emerald-100"
+                      initial={false}
+                      transition={transitions.standard}
+                    />
+                  )}
+                  <span className={`w-5 h-5 relative z-10 ${isActive ? 'text-emerald-600' : ''}`}>{item.icon}</span>
+                  {!collapsed && <span className="truncate relative z-10">{item.label}</span>}
+                </Link>
+              </motion.li>
+            )
+          })}
 
-          {userEmail === 'raymart.leyson.rl@gmail.com' && (
-            <li>
-              <Link href="/admin" className={`flex items-center gap-3 w-full text-sm text-slate-700 hover:bg-gray-50 rounded-md px-3 py-2 ${collapsed ? 'justify-center' : ''}`} aria-label="Admin" title="Admin">
-                <span className="w-5 h-5 text-slate-600">{ICON(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" /></svg>)}</span>
+
+          {/* Supply: always visible */}
+          <motion.li variants={listItem}>
+            <Link href="/supply" className={`flex items-center gap-3 w-full text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-xl px-3 py-2.5 transition-colors ${collapsed ? 'justify-center' : ''}`} aria-label="Supply" title="Supply">
+              <span className="w-5 h-5 text-stone-600">{ICON(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="7.5 4.21 12 6.81 16.5 4.21" /><polyline points="7.5 19.79 7.5 14.6 3 12" /><polyline points="21 12 16.5 14.6 16.5 19.79" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>)}</span>
+              {!collapsed && <span className="truncate">Supply</span>}
+            </Link>
+          </motion.li>
+
+          {/* Admin: visible for owner email only */}
+          {isOwner && (
+            <motion.li variants={listItem}>
+              <Link href="/admin" className={`flex items-center gap-3 w-full text-sm text-stone-600 hover:text-stone-900 hover:bg-stone-50 rounded-xl px-3 py-2.5 transition-colors ${collapsed ? 'justify-center' : ''}`} aria-label="Admin" title="Admin">
+                <span className="w-5 h-5 text-stone-600">{ICON(<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" width="20" height="20" focusable="false"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7l3-7z" /></svg>)}</span>
                 {!collapsed && <span className="truncate">Admin</span>}
               </Link>
-            </li>
+            </motion.li>
           )}
-        </ul>
+        </motion.ul>
       </nav>
     </>
   )
@@ -126,19 +210,38 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative h-full bg-white w-64 shadow-xl">
-            {navContent}
-          </aside>
-        </div>
-      )}
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.div 
+              className="fixed inset-0 z-40 bg-black/40 lg:hidden backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={transitions.fast}
+              onClick={() => setMobileOpen(false)} 
+            />
+            <motion.aside 
+              className="fixed left-0 top-0 bottom-0 z-50 h-full bg-white w-64 shadow-2xl lg:hidden flex flex-col"
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={transitions.standard}
+            >
+              {navContent}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Desktop sidebar */}
-      <aside className={`flex-shrink-0 h-screen bg-white border-r border-gray-100 ${collapsed ? 'w-20' : 'w-72'} hidden md:flex flex-col`}>
+      <motion.aside 
+        className={`flex-shrink-0 h-screen bg-white border-r border-stone-200 hidden lg:flex flex-col shadow-sm`}
+        animate={{ width: collapsed ? 80 : 240 }}
+        transition={transitions.standard}
+      >
         {navContent}
-      </aside>
+      </motion.aside>
     </>
   )
 }

@@ -134,16 +134,16 @@ export default function AdminUsersPage() {
             {loading ? (
               <div>Loading…</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-xl border border-stone-200">
                 <table className="w-full text-sm table-auto">
-                  <thead>
-                    <tr className="text-slate-600 text-left">
-                      <th className="px-3 py-2">Email</th>
-                      <th className="px-3 py-2">Created</th>
-                      <th className="px-3 py-2">Plan</th>
-                      <th className="px-3 py-2">Expiry</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2 text-right">Actions</th>
+                  <thead className="bg-stone-50">
+                    <tr className="text-left border-b-2 border-stone-200">
+                      <th className="px-4 py-3 font-semibold text-stone-700">Email</th>
+                      <th className="px-4 py-3 font-semibold text-stone-700">Created</th>
+                      <th className="px-4 py-3 font-semibold text-stone-700">Plan</th>
+                      <th className="px-4 py-3 font-semibold text-stone-700">Expiry</th>
+                      <th className="px-4 py-3 font-semibold text-stone-700">Status</th>
+                      <th className="px-4 py-3 text-right font-semibold text-stone-700">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -153,22 +153,24 @@ export default function AdminUsersPage() {
                     {users.map(u => {
                       const edit = editing[u.id]
                       return (
-                        <tr key={u.id} className="border-t">
-                          <td className="px-3 py-3 align-top">{u.email ?? <em className="text-slate-500">(no email)</em>}</td>
-                          <td className="px-3 py-3 align-top">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</td>
-                          <td className="px-3 py-3 align-top">
+                        <tr key={u.id} className="border-t border-stone-100 hover:bg-stone-50 transition-colors">
+                          <td className="px-4 py-4 align-top font-medium text-stone-900">{u.email ?? <em className="text-stone-500">(no email)</em>}</td>
+                          <td className="px-4 py-4 align-top text-stone-600">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</td>
+                          <td className="px-4 py-4 align-top">
                             {edit ? (
-                              <select className="input" value={edit.plan ?? ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), plan: e.target.value || null } }))}>
+                              <select className="border-2 border-stone-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent" value={edit.plan ?? ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), plan: e.target.value || null } }))}>
                                 <option value="">(none)</option>
-                                {PLANS.map(p => <option key={p} value={p}>{p}</option>)}
+                                {PLANS.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
                               </select>
                             ) : (
-                              u.plan || <em className="text-slate-500">not set</em>
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                {u.plan ? u.plan.charAt(0).toUpperCase() + u.plan.slice(1) : <em className="text-stone-500">not set</em>}
+                              </span>
                             )}
                           </td>
-                          <td className="px-3 py-3 align-top">
+                          <td className="px-4 py-4 align-top">
                             {edit ? (
-                              <input className="input" type="datetime-local" value={edit.expiry_date ? new Date(edit.expiry_date).toISOString().slice(0,16) : ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), expiry_date: e.target.value ? new Date(e.target.value).toISOString() : null } }))} />
+                              <input className="border-2 border-stone-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent" type="datetime-local" value={edit.expiry_date ? new Date(edit.expiry_date).toISOString().slice(0,16) : ''} onChange={e => setEditing(s => ({ ...s, [u.id]: { ...(s[u.id] || {}), expiry_date: e.target.value ? new Date(e.target.value).toISOString() : null } }))} />
                             ) : (
                               u.expiry_date ? new Date(u.expiry_date).toLocaleString() : <em className="text-slate-500">not set</em>
                             )}
@@ -178,16 +180,24 @@ export default function AdminUsersPage() {
                             {statusFor(u) === 'expired' && <span className="inline-flex items-center px-2 py-1 rounded-md text-xs bg-yellow-100 text-yellow-800">Expired</span>}
                             {statusFor(u) === 'locked' && <span className="inline-flex items-center px-2 py-1 rounded-md text-xs bg-slate-100 text-slate-700">Locked</span>}
                           </td>
-                          <td className="px-3 py-3 align-top text-right">
+                          <td className="px-4 py-4 align-top text-right">
                             {edit ? (
                               <div className="flex gap-2 justify-end">
-                                <Button onClick={() => saveSubscription(u.id)}>Save</Button>
-                                <Button intent="secondary" onClick={() => cancelEdit(u.id)}>Cancel</Button>
+                                <button onClick={() => saveSubscription(u.id)} className="px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg hover:from-emerald-600 hover:to-emerald-700 font-medium transition-all text-sm shadow-sm">
+                                  Save
+                                </button>
+                                <button onClick={() => cancelEdit(u.id)} className="px-3 py-1.5 bg-white border-2 border-stone-300 text-stone-700 rounded-lg hover:bg-stone-50 font-medium transition-all text-sm">
+                                  Cancel
+                                </button>
                               </div>
                             ) : (
                               <div className="flex gap-2 justify-end">
-                                <Button onClick={() => startEdit(u)}>Edit</Button>
-                                <Button onClick={() => { setEditing(s => ({ ...s, [u.id]: { plan: null, expiry_date: null } })); saveSubscription(u.id) }}>Lock</Button>
+                                <button onClick={() => startEdit(u)} className="px-3 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium transition-all text-sm shadow-sm">
+                                  Edit
+                                </button>
+                                <button onClick={() => { setEditing(s => ({ ...s, [u.id]: { plan: null, expiry_date: null } })); saveSubscription(u.id) }} className="px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium transition-all text-sm shadow-sm">
+                                  Lock
+                                </button>
                               </div>
                             )}
                           </td>

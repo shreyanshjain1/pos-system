@@ -1,7 +1,7 @@
-// Minimal IndexedDB-backed offline outbox and barcode/product cache.
-// Provides basic queueing for client-side writes when offline.
+// Offline queue for pending transactions and cache
+// Uses IndexedDB for persistence across page reloads
 
-type OutboxItem = {
+export type OutboxItem = {
   queueId: string
   deviceId?: string
   shopId?: string
@@ -15,336 +15,332 @@ type OutboxItem = {
   lastError?: string | null
 }
 
-const DB_NAME = 'pos_offline_v1'
-const OUTBOX_STORE = 'pos_outbox'
-const PRODUCTS_STORE = 'pos_cache_products'
-const BARCODES_STORE = 'pos_cache_barcodes'
-const SALES_STORE = 'pos_pending_sales'
-const LS_FALLBACK_KEY = 'pos_offbox_fallback_v1'
+const DB_NAME = 'pos-offline-db'
+const DB_VERSION = 1
+const STORE_NAME = 'outbox'
+const CACHE_STORE = 'cache'
+const PRODUCTS_LIST_KEY = 'products-list'
 
-function openDB(): Promise<IDBDatabase> {
+let db: IDBDatabase | null = null
+
+async function initDB(): Promise<IDBDatabase> {
+  if (db) return db
+
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2)
-    req.onupgradeneeded = () => {
-      const db = req.result
-      if (!db.objectStoreNames.contains(OUTBOX_STORE)) db.createObjectStore(OUTBOX_STORE, { keyPath: 'queueId' })
-      if (!db.objectStoreNames.contains(PRODUCTS_STORE)) db.createObjectStore(PRODUCTS_STORE, { keyPath: 'id' })
-      if (!db.objectStoreNames.contains(BARCODES_STORE)) db.createObjectStore(BARCODES_STORE, { keyPath: 'code' })
-      if (!db.objectStoreNames.contains(SALES_STORE)) db.createObjectStore(SALES_STORE, { keyPath: 'id' })
-    }
-    req.onsuccess = () => resolve(req.result)
+    const req = indexedDB.open(DB_NAME, DB_VERSION)
+
     req.onerror = () => reject(req.error)
+    req.onsuccess = () => {
+      db = req.result
+      resolve(db)
+    }
+
+    req.onupgradeneeded = (e) => {
+      const database = (e.target as IDBOpenDBRequest).result
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.createObjectStore(STORE_NAME, { keyPath: 'queueId' })
+      }
+      if (!database.objectStoreNames.contains(CACHE_STORE)) {
+        database.createObjectStore(CACHE_STORE, { keyPath: 'key' })
+      }
+    }
   })
 }
 
-function genId() {
-  try { return (globalThis.crypto as any).randomUUID() } catch (_) { return Math.random().toString(36).slice(2) }
-}
-
-export async function addOutboxItem(actionType: string, payload: any, opts?: { deviceId?: string; shopId?: string; userId?: string; role?: string }) {
-  // Try IndexedDB first, but fall back to localStorage if unavailable (e.g. strict contexts)
+export async function addOutboxItem(
+  actionType: string,
+  payload: any,
+  opts?: { deviceId?: string; shopId?: string; userId?: string; role?: string }
+): Promise<string> {
   try {
-    const db = await openDB()
-    return new Promise<string>((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-      const store = tx.objectStore(OUTBOX_STORE)
-      const item: OutboxItem = {
-        queueId: genId(),
-        deviceId: opts?.deviceId,
-        shopId: opts?.shopId,
-        userId: opts?.userId,
-        role: opts?.role,
-        timestamp: new Date().toISOString(),
-        actionType,
-        payload,
-        retryCount: 0,
-        status: 'pending',
-        lastError: null,
-      }
-      // use put (upsert) which is more resilient than add when keyPath issues occur
-      const req = store.put(item as any)
-      req.onsuccess = () => resolve(item.queueId)
+    const database = await initDB()
+    const queueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+    const item: OutboxItem = {
+      queueId,
+      deviceId: opts?.deviceId,
+      shopId: opts?.shopId,
+      userId: opts?.userId,
+      role: opts?.role,
+      timestamp: new Date().toISOString(),
+      actionType,
+      payload,
+      retryCount: 0,
+      status: 'pending',
+      lastError: null,
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.add(item)
+
       req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        broadcastDataUpdate()
+        resolve(queueId)
+      }
     })
   } catch (e) {
-    // fallback to localStorage
-    try {
-      const raw = localStorage.getItem(LS_FALLBACK_KEY)
-      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
-      const item: OutboxItem = {
-        queueId: genId(),
-        deviceId: opts?.deviceId,
-        shopId: opts?.shopId,
-        userId: opts?.userId,
-        role: opts?.role,
-        timestamp: new Date().toISOString(),
-        actionType,
-        payload,
-        retryCount: 0,
-        status: 'pending',
-        lastError: null,
-      }
-      arr.push(item)
-      localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(arr))
-      return item.queueId
-    } catch (le) {
-      throw le
-    }
+    console.error('Failed to add outbox item:', e)
+    return Promise.resolve('')
   }
 }
 
 export async function getAllOutboxItems(): Promise<OutboxItem[]> {
   try {
-    const db = await openDB()
+    const database = await initDB()
+
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readonly')
-      const store = tx.objectStore(OUTBOX_STORE)
+      const tx = database.transaction(STORE_NAME, 'readonly')
+      const store = tx.objectStore(STORE_NAME)
       const req = store.getAll()
-      req.onsuccess = () => resolve(req.result as OutboxItem[])
+
       req.onerror = () => reject(req.error)
+      req.onsuccess = () => resolve(req.result)
     })
   } catch (e) {
-    // localStorage fallback
-    try {
-      const raw = localStorage.getItem(LS_FALLBACK_KEY)
-      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
-      return arr
-    } catch (le) {
-      return []
-    }
+    console.error('Failed to get outbox items:', e)
+    return []
   }
 }
 
-export async function deleteOutboxItem(id: string) {
+export async function deleteOutboxItem(id: string): Promise<void> {
   try {
-    const db = await openDB()
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-      const store = tx.objectStore(OUTBOX_STORE)
+    const database = await initDB()
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
       const req = store.delete(id)
-      req.onsuccess = () => resolve()
+
       req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        broadcastDataUpdate()
+        resolve()
+      }
     })
   } catch (e) {
-    try {
-      const raw = localStorage.getItem(LS_FALLBACK_KEY)
-      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
-      const filtered = arr.filter(a => a.queueId !== id)
-      localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(filtered))
-      return
-    } catch (le) {
-      throw le
-    }
+    console.error('Failed to delete outbox item:', e)
   }
 }
 
-export async function updateOutboxAttempts(id: string, attempts: number) {
+export async function updateOutboxAttempts(id: string, attempts: number): Promise<void> {
   try {
-    const db = await openDB()
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-      const store = tx.objectStore(OUTBOX_STORE)
+    const database = await initDB()
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
       const getReq = store.get(id)
-      getReq.onsuccess = () => {
-        const rec = getReq.result
-        if (!rec) return resolve()
-        rec.retryCount = attempts
-        const putReq = store.put(rec)
-        putReq.onsuccess = () => resolve()
-        putReq.onerror = () => reject(putReq.error)
-      }
+
       getReq.onerror = () => reject(getReq.error)
+      getReq.onsuccess = () => {
+        const item = getReq.result as OutboxItem
+        if (item) {
+          item.retryCount = attempts
+          const updateReq = store.put(item)
+          updateReq.onerror = () => reject(updateReq.error)
+          updateReq.onsuccess = () => {
+            broadcastDataUpdate()
+            resolve()
+          }
+        } else resolve()
+      }
     })
   } catch (e) {
-    try {
-      const raw = localStorage.getItem(LS_FALLBACK_KEY)
-      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
-      const idx = arr.findIndex(x => x.queueId === id)
-      if (idx >= 0) {
-        arr[idx].retryCount = attempts
-        localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(arr))
-      }
-      return
-    } catch (le) { throw le }
+    console.error('Failed to update outbox attempts:', e)
   }
 }
 
-export async function updateOutboxStatus(id: string, status: 'pending' | 'synced' | 'failed', lastError?: string | null) {
+export async function updateOutboxStatus(
+  id: string,
+  status: 'pending' | 'synced' | 'failed',
+  lastError?: string | null
+): Promise<void> {
   try {
-    const db = await openDB()
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(OUTBOX_STORE, 'readwrite')
-      const store = tx.objectStore(OUTBOX_STORE)
+    const database = await initDB()
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
       const getReq = store.get(id)
-      getReq.onsuccess = () => {
-        const rec = getReq.result
-        if (!rec) return resolve()
-        rec.status = status
-        rec.lastError = lastError ?? null
-        const putReq = store.put(rec)
-        putReq.onsuccess = () => resolve()
-        putReq.onerror = () => reject(putReq.error)
-      }
+
       getReq.onerror = () => reject(getReq.error)
+      getReq.onsuccess = () => {
+        const item = getReq.result as OutboxItem
+        if (item) {
+          item.status = status
+          item.lastError = lastError || null
+          const updateReq = store.put(item)
+          updateReq.onerror = () => reject(updateReq.error)
+          updateReq.onsuccess = () => {
+            broadcastDataUpdate()
+            resolve()
+          }
+        } else resolve()
+      }
     })
   } catch (e) {
-    try {
-      const raw = localStorage.getItem(LS_FALLBACK_KEY)
-      const arr: OutboxItem[] = raw ? JSON.parse(raw) : []
-      const idx = arr.findIndex(x => x.queueId === id)
-      if (idx >= 0) {
-        arr[idx].status = status
-        arr[idx].lastError = lastError ?? null
-        localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(arr))
-      }
-      return
-    } catch (le) { throw le }
+    console.error('Failed to update outbox status:', e)
   }
 }
 
-export async function cacheProduct(product: any) {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(PRODUCTS_STORE, 'readwrite')
-    const store = tx.objectStore(PRODUCTS_STORE)
-    // Ensure product has an `id` matching the store's keyPath
-    try {
-      if (!product || typeof product !== 'object') throw new Error('invalid product')
-      if (product.id === undefined || product.id === null || product.id === '') {
-        // assign temporary id so put/add won't fail when keyPath is required
-        try { product.id = (globalThis.crypto as any)?.randomUUID?.() ?? Math.random().toString(36).slice(2) } catch (_) { product.id = Math.random().toString(36).slice(2) }
-      }
-    } catch (e) {
-      return reject(e)
-    }
+export async function cacheProduct(product: any): Promise<void> {
+  try {
+    const database = await initDB()
+    const key = `product-${product.id}`
 
-    const req = store.put(product)
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readwrite')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.put({ key, data: product, timestamp: Date.now() })
+
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => resolve()
+    })
+  } catch (e) {
+    console.error('Failed to cache product:', e)
+  }
 }
 
-export async function cacheBarcode(code: string, product: any) {
-  const db = await openDB()
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(BARCODES_STORE, 'readwrite')
-    const store = tx.objectStore(BARCODES_STORE)
-    const req = store.put({ code, product })
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
+export async function cacheBarcode(code: string, product: any): Promise<void> {
+  try {
+    const database = await initDB()
+    const key = `barcode-${code}`
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readwrite')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.put({ key, data: product, timestamp: Date.now() })
+
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => resolve()
+    })
+  } catch (e) {
+    console.error('Failed to cache barcode:', e)
+  }
 }
 
 export async function lookupBarcodeCached(code: string): Promise<any | null> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(BARCODES_STORE, 'readonly')
-    const store = tx.objectStore(BARCODES_STORE)
-    const req = store.get(code)
-    req.onsuccess = () => resolve(req.result ? req.result.product : null)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-// Pending sales helpers: store receipts/sales locally so POS can show queued receipts
-type PendingSale = {
-  id: string
-  deviceId?: string
-  shopId?: string
-  timestamp: string
-  items: any[]
-  total: number
-  payment_method?: string
-  payment?: number
-  change?: number
-  status?: 'pending' | 'synced' | 'failed'
-}
-
-export async function addPendingSale(payload: { deviceId?: string; shopId?: string; items: any[]; total: number; payment_method?: string; payment?: number; change?: number }) {
-  const sale: PendingSale = {
-    id: genId(),
-    deviceId: payload.deviceId,
-    shopId: payload.shopId,
-    timestamp: new Date().toISOString(),
-    items: payload.items,
-    total: payload.total,
-    payment_method: payload.payment_method,
-    payment: payload.payment,
-    change: payload.change,
-    status: 'pending',
-  }
-
   try {
-    const db = await openDB()
-    return new Promise<string>((resolve, reject) => {
-      const tx = db.transaction(SALES_STORE, 'readwrite')
-      const store = tx.objectStore(SALES_STORE)
-      // use put to avoid errors if the key already exists or keyPath handling is quirky
-      const req = store.put(sale as any)
-      req.onsuccess = () => resolve(sale.id)
-      req.onerror = () => reject(req.error)
-    })
-  } catch (e) {
-    // fallback to localStorage under a separate key
-    try {
-      const key = 'pos_pending_sales_fallback_v1'
-      const raw = localStorage.getItem(key)
-      const arr: PendingSale[] = raw ? JSON.parse(raw) : []
-      arr.push(sale)
-      localStorage.setItem(key, JSON.stringify(arr))
-      return sale.id
-    } catch (le) { throw le }
-  }
-}
+    const database = await initDB()
+    const key = `barcode-${code}`
 
-export async function getPendingSales(): Promise<PendingSale[]> {
-  try {
-    const db = await openDB()
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(SALES_STORE, 'readonly')
-      const store = tx.objectStore(SALES_STORE)
-      const req = store.getAll()
-      req.onsuccess = () => resolve(req.result as PendingSale[])
+      const tx = database.transaction(CACHE_STORE, 'readonly')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.get(key)
+
       req.onerror = () => reject(req.error)
+      req.onsuccess = () => resolve(req.result?.data || null)
     })
   } catch (e) {
-    try {
-      const key = 'pos_pending_sales_fallback_v1'
-      const raw = localStorage.getItem(key)
-      const arr: PendingSale[] = raw ? JSON.parse(raw) : []
-      return arr
-    } catch (le) { return [] }
+    console.error('Failed to lookup cached barcode:', e)
+    return null
   }
 }
 
-export async function deletePendingSale(id: string) {
+export async function cacheProductsList(products: any[]): Promise<void> {
   try {
-    const db = await openDB()
-    return new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(SALES_STORE, 'readwrite')
-      const store = tx.objectStore(SALES_STORE)
-      const req = store.delete(id)
+    const database = await initDB()
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readwrite')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.put({ key: PRODUCTS_LIST_KEY, data: products, timestamp: Date.now() })
+
+      req.onerror = () => reject(req.error)
       req.onsuccess = () => resolve()
-      req.onerror = () => reject(req.error)
     })
   } catch (e) {
-    try {
-      const key = 'pos_pending_sales_fallback_v1'
-      const raw = localStorage.getItem(key)
-      const arr: any[] = raw ? JSON.parse(raw) : []
-      const filtered = arr.filter(a => a.id !== id)
-      localStorage.setItem(key, JSON.stringify(filtered))
-      return
-    } catch (le) { throw le }
+    console.error('Failed to cache products list:', e)
   }
 }
 
-export default { addOutboxItem, getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, updateOutboxStatus, cacheProduct, cacheBarcode, lookupBarcodeCached, addPendingSale, getPendingSales, deletePendingSale }
-
-// Broadcast update helper: notifies other tabs/clients that products/sales changed
-export function broadcastDataUpdate() {
+export async function getCachedProductsList(): Promise<any[]> {
   try {
-    // use BroadcastChannel when available
+    const database = await initDB()
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readonly')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.get(PRODUCTS_LIST_KEY)
+
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => resolve(req.result?.data || [])
+    })
+  } catch (e) {
+    console.error('Failed to get cached products list:', e)
+    return []
+  }
+}
+
+export async function addPendingSale(sale: any): Promise<void> {
+  try {
+    const database = await initDB()
+    const key = `pending-sale-${sale.id || Date.now()}`
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readwrite')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.put({ key, data: sale, timestamp: Date.now() })
+
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        broadcastDataUpdate()
+        resolve()
+      }
+    })
+  } catch (e) {
+    console.error('Failed to add pending sale:', e)
+  }
+}
+
+export async function getPendingSales(): Promise<any[]> {
+  try {
+    const database = await initDB()
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readonly')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.getAll()
+
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        const items = req.result.filter((item: any) => item.key.startsWith('pending-sale-'))
+        resolve(items.map((item: any) => item.data))
+      }
+    })
+  } catch (e) {
+    console.error('Failed to get pending sales:', e)
+    return []
+  }
+}
+
+export async function deletePendingSale(id: string): Promise<void> {
+  try {
+    const database = await initDB()
+    const key = `pending-sale-${id}`
+
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction(CACHE_STORE, 'readwrite')
+      const store = tx.objectStore(CACHE_STORE)
+      const req = store.delete(key)
+
+      req.onerror = () => reject(req.error)
+      req.onsuccess = () => {
+        broadcastDataUpdate()
+        resolve()
+      }
+    })
+  } catch (e) {
+    console.error('Failed to delete pending sale:', e)
+  }
+}
+
+export function broadcastDataUpdate(): void {
+  try {
     if (typeof BroadcastChannel !== 'undefined') {
       const bc = new BroadcastChannel('pos-updates')
       bc.postMessage({ type: 'data-updated', at: Date.now() })
@@ -352,9 +348,23 @@ export function broadcastDataUpdate() {
       return
     }
   } catch (_) {}
-
-  // fallback: use localStorage event
   try {
     localStorage.setItem('pos:data-updated', String(Date.now()))
   } catch (_) {}
+}
+
+export default {
+  addOutboxItem,
+  getAllOutboxItems,
+  deleteOutboxItem,
+  updateOutboxAttempts,
+  updateOutboxStatus,
+  cacheProduct,
+  cacheBarcode,
+  lookupBarcodeCached,
+  cacheProductsList,
+  getCachedProductsList,
+  addPendingSale,
+  getPendingSales,
+  deletePendingSale,
 }

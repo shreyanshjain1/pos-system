@@ -8,6 +8,7 @@ export async function POST(req: Request) {
     const bodyRec = body as unknown as Record<string, unknown>
     const user_id = bodyRec?.user_id as string | undefined
     const shop_name = bodyRec?.shop_name as string | undefined
+    const pos_type = bodyRec?.pos_type as string | undefined
     if (!user_id || !shop_name) {
       return NextResponse.json({ error: 'user_id and shop_name required' }, { status: 400 })
     }
@@ -52,13 +53,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ shop })
     }
 
-    // Create a new shop
-      const shopId = randomUUID()
-      const { data: shopData, error: shopErr } = await supabaseAdmin
-        .from('shops')
-        .insert({ id: shopId, name: shop_name, owner_user_id: user_id })
-        .select('*')
-        .single()
+    // Ensure shop name is not already taken (case-insensitive)
+    const { data: existingByName, error: nameErr } = await supabaseAdmin
+      .from('shops')
+      .select('id, name')
+      .ilike('name', shop_name)
+      .limit(1)
+
+    if (nameErr) throw nameErr
+    if (existingByName && existingByName.length > 0) {
+      return NextResponse.json({ error: 'Shop name already taken' }, { status: 409 })
+    }
+
+    // Create a new shop (include pos_type when provided)
+    const shopId = randomUUID()
+    const insertObj: Record<string, unknown> = { id: shopId, name: shop_name, owner_user_id: user_id }
+    if (pos_type && pos_type !== '') {
+      insertObj.pos_type = pos_type
+      insertObj.pos_type_selected_at = new Date().toISOString()
+    }
+    const { data: shopData, error: shopErr } = await supabaseAdmin
+      .from('shops')
+      .insert(insertObj)
+      .select('*')
+      .single()
 
     if (shopErr) throw shopErr
 

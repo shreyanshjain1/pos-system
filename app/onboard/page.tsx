@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 
 export default function OnboardPage() {
   const [shopName, setShopName] = useState('')
+  const [posType, setPosType] = useState<string>('retail')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -23,6 +24,7 @@ export default function OnboardPage() {
     setError(null)
     setMessage(null)
     if (!shopName || shopName.trim() === '') return setError('Store name is required')
+    if (!posType) return setError('Choose a shop type')
     setLoading(true)
     try {
       let accessToken: string | null = null
@@ -45,7 +47,7 @@ export default function OnboardPage() {
       const resp = await fetch('/api/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ user_id: userId, shop_name: shopName.trim() })
+        body: JSON.stringify({ user_id: userId, shop_name: shopName.trim(), pos_type: posType })
       })
       const payload = await resp.json()
       if (!resp.ok) throw new Error(payload?.error || 'Onboarding failed')
@@ -71,6 +73,15 @@ export default function OnboardPage() {
         <div className="flex-column"><label>Store name</label></div>
         <div className="inputForm"><input value={shopName} onChange={e => setShopName(e.target.value)} placeholder="Store name" className="input" /></div>
 
+        <div className="flex-column"><label>Shop type</label></div>
+        <div className="types">
+          {['retail', 'coffee', 'food', 'building_materials', 'services'].map(t => (
+            <div key={t} onClick={() => setPosType(t)} className={posType === t ? 'type selected' : 'type'} style={{ textTransform: 'capitalize' }}>
+              {t.replace('_', ' ')}
+            </div>
+          ))}
+        </div>
+
         {error && <div style={{ color: 'red' }}>{error}</div>}
         {message && <div style={{ color: 'green' }}>{message}</div>}
 
@@ -84,6 +95,9 @@ export default function OnboardPage() {
           .input { border-radius:0; border:none; width:100%; height:100%; background:transparent; padding:0 8px; outline:none; }
           .input::placeholder { color: #9aa3a8 }
           .button-submit { margin-top:10px; background:#151717; color:white; border:none; height:50px; border-radius:10px }
+              .types { display:flex; gap:8px; flex-wrap:wrap }
+              .type { border:1px solid #e5e7eb; padding:8px 12px; border-radius:8px; cursor:pointer }
+              .type.selected { border:2px solid #2563eb }
           .p { text-align:center; }
           .span { color:#2d79f3; cursor:pointer }
         `}</style>

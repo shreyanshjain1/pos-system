@@ -59,15 +59,25 @@ export async function POST(req: Request) {
     // Create a default shop. Prefer metadata.name or email as fallback
     const shopName = (user?.user_metadata?.store_name) || (user?.email) || 'My Shop'
 
-    const { data: shopData, error: shopErr } = await supabaseAdmin
-      .from('shops')
-      .insert({ name: shopName, owner_user_id: userId })
-      .select('*')
-      .single()
-
-    if (shopErr) {
-      console.error('Webhook: create shop error', shopErr)
-      return NextResponse.json({ error: 'Create shop failed' }, { status: 500 })
+    // Try to create a shop; if name already exists (unique constraint), map to existing
+    let shopData: any = null
+    try {
+      const insertRes = await supabaseAdmin
+        .from('shops')
+        .insert({ name: shopName, owner_user_id: userId })
+        .select('*')
+        .single()
+      shopData = insertRes.data
+    } catch (e) {
+      console.warn('Webhook: shop insert may have failed, checking existing by name', e)
+      // Lookup existing shop by name (case-insensitive)
+      const { data: found } = await supabaseAdmin.from('shops').select('*').ilike('name', shopName).limit(1)
+      if (found && found.length > 0) {
+        shopData = found[0]
+      } else {
+        console.error('Webhook: create shop error', e)
+        return NextResponse.json({ error: 'Create shop failed' }, { status: 500 })
+      }
     }
 
     const { data: mapData, error: mapErr } = await supabaseAdmin

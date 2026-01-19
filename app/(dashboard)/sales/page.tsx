@@ -6,18 +6,25 @@ import Button from '@/components/ui/Button'
 import formatCurrency from '@/lib/format/currency'
 import ReceiptPreview from '@/components/print/ReceiptPreview'
 import ThermalReceipt from '@/components/print/ThermalReceipt'
+import SectionErrorBoundary from '@/components/ui/SectionErrorBoundary'
+import { motion } from 'framer-motion'
+import { pageVariants, tableRowVariants } from '@/lib/motion'
 
 type SaleItem = { id: string; product_id: string; quantity: number; price: number }
 type Sale = { id: string; total: number; payment_method?: string; created_at?: string; sale_items?: SaleItem[] }
 
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([])
+  const [dateFrom, setDateFrom] = useState<string>('')
+  const [dateTo, setDateTo] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(20)
   const [count, setCount] = useState<number | null>(null)
   const [detail, setDetail] = useState<Sale | null>(null)
+  const [serverTotalPayment, setServerTotalPayment] = useState<number | null>(null)
+  const [serverTotalItems, setServerTotalItems] = useState<number | null>(null)
 
   const pollTimerRef = useRef<number | null>(null)
   const fetchControllerRef = useRef<AbortController | null>(null)
@@ -39,7 +46,12 @@ export default function SalesPage() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetchWithAuth(`/api/sales?page=${p}&pageSize=${pageSize}`, { signal: controller.signal })
+      const params = new URLSearchParams()
+      params.set('page', String(p))
+      params.set('pageSize', String(pageSize))
+      if (dateFrom) params.set('from', dateFrom)
+      if (dateTo) params.set('to', dateTo)
+      const res = await fetchWithAuth(`/api/sales?${params.toString()}`, { signal: controller.signal })
       if (res.status === 401) {
         window.location.href = '/onboard'
         return
@@ -52,6 +64,14 @@ export default function SalesPage() {
       const obj = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
       setSales((obj['data'] ?? []) as Sale[])
       setCount((obj['count'] as number) ?? null)
+      const totals = obj['totals'] as Record<string, unknown> | undefined
+      if (totals) {
+        setServerTotalPayment(Number(totals['total_payment'] ?? null) ?? null)
+        setServerTotalItems(Number(totals['total_items'] ?? null) ?? null)
+      } else {
+        setServerTotalPayment(null)
+        setServerTotalItems(null)
+      }
     } catch (err: unknown) {
       if (typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError') return
       const msg = err instanceof Error ? err.message : String(err)
@@ -64,52 +84,117 @@ export default function SalesPage() {
 
   const totalPages = count ? Math.ceil(count / pageSize) : null
 
+  // Totals across the currently-loaded page (server could also return totals)
+  const pagePayment = sales.reduce((s, r) => s + (Number(r.total) || 0), 0)
+  const pageItems = sales.reduce((s, r) => s + ((r.sale_items || []).reduce((si, it) => si + (Number((it as SaleItem).quantity) || 0), 0)), 0)
+  const overallPayment = serverTotalPayment ?? pagePayment
+  const overallItems = serverTotalItems ?? pageItems
+
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-semibold">Sales</h2>
-        <p className="text-sm text-slate-500">Sale history and receipts</p>
+    <motion.div
+      variants={pageVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <div className="mb-8">
+        <h2 className="text-3xl font-bold tracking-tight text-stone-900">Sales History</h2>
+        <p className="text-sm text-stone-500 mt-1">View transactions and receipts</p>
       </div>
 
       <Card>
+        <div className="mb-6 flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-stone-700">From</label>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border-2 border-stone-300 px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-stone-700">To</label>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border-2 border-stone-300 px-3 py-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow" />
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <button onClick={() => { setPage(1); fetchPage(1) }} className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-xl hover:from-emerald-600 hover:to-emerald-700 font-semibold transition-all shadow-sm hover:shadow-md">
+              Apply Filters
+            </button>
+            <button onClick={() => { setDateFrom(''); setDateTo(''); setPage(1); fetchPage(1) }} className="px-4 py-2 bg-white border-2 border-stone-300 text-stone-700 rounded-xl hover:bg-stone-50 font-semibold transition-all">
+              Reset
+            </button>
+          </div>
+        </div>
+
+        <div className="mb-6 flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span className="text-sm text-stone-600">Total Payment:</span>
+            <strong className="text-lg font-bold text-stone-900">{formatCurrency(overallPayment)}</strong>
+          </div>
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span className="text-sm text-stone-600">Total Items:</span>
+            <strong className="text-lg font-bold text-stone-900">{overallItems}</strong>
+          </div>
+        </div>
         {loading ? (
           <div className="h-44 animate-pulse bg-white rounded-md" />
         ) : error ? (
           <div className="text-red-600">{error}</div>
         ) : (
-          <div>
-            {/* Desktop/tablet: table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-slate-600">
-                    <th className="py-2 text-left">ID</th>
-                    <th className="py-2 text-left">Date</th>
-                    <th className="py-2 text-right">Total</th>
-                    <th className="py-2 text-left">Payment</th>
-                    <th className="py-2 text-right">Items</th>
-                    <th className="py-2 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sales.map(s => (
-                    <tr key={s.id} className="border-t border-gray-100">
-                      <td className="py-3">{s.id}</td>
-                      <td className="py-3">{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</td>
-                      <td className="py-3 text-right">{formatCurrency(s.total)}</td>
-                      <td className="py-3">{s.payment_method ?? '—'}</td>
-                      <td className="py-3 text-right">{(s.sale_items || []).length}</td>
-                      <td className="py-3 text-right">
-                        <Button onClick={() => setDetail(s)}>View</Button>
-                      </td>
+          <SectionErrorBoundary section="Sales Table">
+            <div>
+              {/* Desktop/tablet: table */}
+              <div className="hidden lg:block overflow-x-auto rounded-xl border border-stone-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-stone-50">
+                    <tr className="border-b-2 border-stone-200">
+                      <th className="py-3 px-4 text-left font-semibold text-stone-700">ID</th>
+                      <th className="py-3 px-4 text-left font-semibold text-stone-700">Date</th>
+                      <th className="py-3 px-4 text-right font-semibold text-stone-700">Total</th>
+                      <th className="py-3 px-4 text-left font-semibold text-stone-700">Payment</th>
+                      <th className="py-3 px-4 text-right font-semibold text-stone-700">Items</th>
+                      <th className="py-3 px-4 text-right font-semibold text-stone-700">Actions</th>
                     </tr>
+                  </thead>
+                  <tbody>
+                    {sales.map(s => (
+                    <motion.tr 
+                      key={s.id} 
+                      className="border-t border-stone-100 hover:bg-stone-50"
+                      variants={tableRowVariants}
+                      initial="initial"
+                      whileHover="hover"
+                    >
+                      <td className="py-4 px-4 font-mono text-xs text-stone-600">{s.id.slice(0, 8)}...</td>
+                      <td className="py-4 px-4 text-stone-900">{s.created_at ? new Date(s.created_at).toLocaleString() : ''}</td>
+                      <td className="py-4 px-4 text-right font-semibold text-stone-900">{formatCurrency(s.total)}</td>
+                      <td className="py-4 px-4">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                          {s.payment_method ?? 'Cash'}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-right text-stone-700">{(s.sale_items || []).length}</td>
+                      <td className="py-4 px-4 text-right">
+                        <button
+                          onClick={() => setDetail(s)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white rounded-lg hover:from-emerald-600 hover:to-emerald-700 font-medium transition-all text-sm shadow-sm hover:shadow-md"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                          View
+                        </button>
+                      </td>
+                    </motion.tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
             {/* Mobile: stacked cards */}
-            <div className="md:hidden space-y-3">
+            <div className="lg:hidden space-y-3">
               {sales.map(s => (
                 <div key={s.id} className="border rounded-lg p-3 bg-white">
                   <div className="flex items-start justify-between gap-3">
@@ -142,15 +227,20 @@ export default function SalesPage() {
               ))}
             </div>
 
-            <div className="mt-4 flex items-center justify-between flex-wrap gap-3">
-              <div className="text-sm text-slate-500">{count ? `${count} sales` : ''}</div>
-              <div className="flex items-center gap-2">
-                <Button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
-                <div className="text-sm">{page}{totalPages ? ` / ${totalPages}` : ''}</div>
-                <Button onClick={() => setPage(p => p + 1)} disabled={totalPages ? page >= totalPages : sales.length < pageSize}>Next</Button>
+            <div className="mt-6 flex items-center justify-between flex-wrap gap-3">
+              <div className="text-sm font-medium text-stone-600">{count ? `${count.toLocaleString()} total transactions` : ''}</div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="px-4 py-2 bg-white border-2 border-stone-300 text-stone-700 rounded-xl hover:bg-stone-50 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                  ← Previous
+                </button>
+                <div className="text-sm font-semibold text-stone-900 bg-stone-100 px-4 py-2 rounded-xl">Page {page}{totalPages ? ` of ${totalPages}` : ''}</div>
+                <button onClick={() => setPage(p => p + 1)} disabled={totalPages ? page >= totalPages : sales.length < pageSize} className="px-4 py-2 bg-white border-2 border-stone-300 text-stone-700 rounded-xl hover:bg-stone-50 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                  Next →
+                </button>
               </div>
             </div>
-          </div>
+            </div>
+          </SectionErrorBoundary>
         )}
       </Card>
 
@@ -158,7 +248,7 @@ export default function SalesPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="w-full max-w-2xl">
             <Card>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <h3 className="text-lg font-semibold mb-3">Receipt preview</h3>
                   <ReceiptPreview
@@ -197,6 +287,6 @@ export default function SalesPage() {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }

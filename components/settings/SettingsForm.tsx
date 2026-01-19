@@ -45,9 +45,12 @@ const DEFAULTS: Settings = {
 export default function SettingsForm() {
   const [settings, setSettings] = useState<Settings>(DEFAULTS)
   const [saved, setSaved] = useState(false)
+  const [birStatus, setBirStatus] = useState<{ accepted: boolean; approved: boolean; accepted_at?: string | null } | null>(null)
+  const [shopMeta, setShopMeta] = useState<{ pos_type?: string | null; plan?: string | null; expiry_date?: string | null } | null>(null)
   useEffect(() => {
     let mounted = true
     async function load() {
+      let gotSettings = false
       // try server first
       try {
         const res = await fetchWithAuth('/api/settings')
@@ -55,16 +58,52 @@ export default function SettingsForm() {
           const json = await res.json()
           if (mounted && json?.data) setSettings(prev => ({ ...prev, ...json.data }))
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...DEFAULTS, ...(json?.data || {}) })) } catch (_) {}
-          return
+          gotSettings = true
         }
       } catch (_) {}
 
-      // fallback to localStorage
+      if (!gotSettings) {
+        // fallback to localStorage
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY)
+          if (raw && mounted) setSettings(JSON.parse(raw))
+        } catch (err) {
+          // ignore parse errors
+        }
+      }
+
+      // Always attempt to fetch the user's shop (for store name) and subscription (plan/expiry/pos_type)
       try {
-        const raw = localStorage.getItem(STORAGE_KEY)
-        if (raw && mounted) setSettings(JSON.parse(raw))
-      } catch (err) {
-        // ignore parse errors
+        const shopRes = await fetchWithAuth('/api/shops/me')
+        if (shopRes.ok) {
+          const shopJson = await shopRes.json()
+          const shopName = shopJson?.data?.name
+          if (mounted && shopName) {
+            setSettings(prev => ({ ...prev, storeName: shopName }))
+            try { const raw = localStorage.getItem(STORAGE_KEY); const parsed = raw ? JSON.parse(raw) : {}; localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...DEFAULTS, ...parsed, storeName: shopName })) } catch (_) {}
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const subRes = await fetchWithAuth('/api/subscription')
+        if (subRes.ok) {
+          const sj = await subRes.json().catch(() => ({}))
+          if (mounted) setShopMeta(prev => ({ ...(prev || {}), plan: sj?.plan ?? null, expiry_date: sj?.expiry_date ?? null, pos_type: sj?.pos_type ?? prev?.pos_type ?? null }))
+        }
+      } catch (_) {}
+
+      // load BIR acceptance status (always run so UI reflects true state)
+      try {
+        const res = await fetchWithAuth('/api/check-bir')
+        if (res.ok) {
+          const j = await res.json().catch(() => ({}))
+          if (mounted) setBirStatus({ accepted: !!j.accepted, approved: !!j.approved, accepted_at: (j as any).accepted_at ?? null })
+        } else {
+          if (mounted) setBirStatus({ accepted: false, approved: false, accepted_at: null })
+        }
+      } catch (_) {
+        if (mounted) setBirStatus({ accepted: false, approved: false, accepted_at: null })
       }
     }
 
@@ -123,11 +162,19 @@ export default function SettingsForm() {
         <div className="text-xs text-gray-700 mb-2">Store name</div>
         <input
           value={settings.storeName}
-          onChange={e => update('storeName', e.target.value)}
-          placeholder="e.g. Drayley's Store"
-          className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-white"
+          readOnly
+          disabled
+          title="Store name is taken from your account and cannot be edited here"
+          placeholder="Store name (from your account)"
+          className="w-full px-3 py-2 rounded-lg border border-gray-200 bg-gray-100 cursor-not-allowed"
         />
       </label>
+
+      <div className="text-sm text-slate-700">
+        <div>Shop type: <strong>{shopMeta?.pos_type ?? 'retail'}</strong></div>
+        <div>Plan: <strong>{shopMeta?.plan ?? 'basic'}</strong></div>
+        <div>Expires: <strong>{shopMeta?.expiry_date ? new Date(shopMeta.expiry_date).toLocaleString() : 'Never'}</strong></div>
+      </div>
 
       <label className="block">
         <div className="text-xs text-slate-700 mb-2">Currency</div>
@@ -239,6 +286,26 @@ export default function SettingsForm() {
               </div>
             </label>
           </div>
+        )}
+      </div>
+
+      <div className="border-t border-gray-200 pt-3">
+        <div className="text-sm font-medium mb-2">BIR acceptance</div>
+        {birStatus ? (
+          birStatus.accepted ? (
+            birStatus.approved ? (
+              <div className="text-sm text-emerald-600">BIR accepted and approved{birStatus.accepted_at ? ` on ${new Date(birStatus.accepted_at).toLocaleString()}` : ''}.</div>
+            ) : (
+              <div className="text-sm text-slate-600">Acceptance recorded — awaiting admin approval.</div>
+            )
+          ) : (
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-slate-600">You have not accepted the BIR disclaimer.</div>
+              <button type="button" onClick={() => { window.location.href = '/onboarding/bir-accept' }} className="px-3 py-1 bg-emerald-600 text-white rounded-md">Open BIR form</button>
+            </div>
+          )
+        ) : (
+          <div className="text-sm text-slate-500">Loading BIR status…</div>
         )}
       </div>
 

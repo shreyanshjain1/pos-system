@@ -4,7 +4,6 @@ import supabase from '@/lib/supabase/client'
 import { getOrCreateDeviceId, registerDeviceWithServer, getStoredDeviceId } from '@/lib/devices'
 import fetchWithAuth from '@/lib/fetchWithAuth'
 import { isMainPOSDevice } from '@/lib/permissions'
-import { startAutoSync, stopAutoSync } from '@/lib/offlineSync'
 
 type DeviceContextValue = {
   deviceId: string | null
@@ -91,32 +90,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       }
     }
     init()
-    // start offline sync processor (best-effort)
-    const stop = startAutoSync({ intervalMs: 20_000 })
     return () => { mounted = false }
   }, [])
-
-  useEffect(() => {
-    return () => {
-      try { stopAutoSync() } catch (_) {}
-    }
-  }, [])
-
-  // PWA: register service worker and handle install prompt
-  const [installPrompt, setInstallPrompt] = useState<any | null>(null)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    // register sw
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
-    }
-    const onBefore = (e: any) => {
-      e.preventDefault()
-      setInstallPrompt(e)
-    }
-    window.addEventListener('beforeinstallprompt', onBefore as EventListener)
-    return () => { window.removeEventListener('beforeinstallprompt', onBefore as EventListener) }
-  }, [])
+  // PWA/service worker removed for online-only mode
 
   // Local shape types to match `lib/permissions` expectations
   type ShopLike = { pos_device_id?: unknown; offline_primary_device_id?: unknown } | null
@@ -128,18 +104,6 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   return (
     <DeviceContext.Provider value={{ deviceId, deviceRow, shop, isMain, isRevoked, loading }}>
       {children}
-      {installPrompt ? (
-        <div className="fixed right-4 bottom-6 z-50">
-          <button className="bg-emerald-600 text-white px-3 py-2 rounded-lg shadow-lg" onClick={async () => {
-            try {
-              const promptEvent = installPrompt
-              promptEvent.prompt()
-              const choice = await promptEvent.userChoice
-              setInstallPrompt(null)
-            } catch (e) { setInstallPrompt(null) }
-          }}>Install POS App</button>
-        </div>
-      ) : null}
     </DeviceContext.Provider>
   )
 }

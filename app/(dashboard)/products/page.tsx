@@ -2,12 +2,15 @@
 import React, { useEffect, useState } from 'react'
 import Button from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import SectionErrorBoundary from '@/components/ui/SectionErrorBoundary'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
+import { motion } from 'framer-motion'
+import { pageVariants, tableRowVariants } from '@/lib/motion'
 
-type Product = { id: string; name: string; price: number; stock: number; barcode?: string }
+type Product = { id: string; name: string; price: number; cost?: number; stock: number; barcode?: string; min_stock?: number; max_stock?: number }
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -18,7 +21,10 @@ export default function ProductsPage() {
   // form for create
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
+  const [cost, setCost] = useState('')
   const [stock, setStock] = useState('')
+  const [minStock, setMinStock] = useState('')
+  const [maxStock, setMaxStock] = useState('')
   const [barcode, setBarcode] = useState('')
   const [showScannerCreate, setShowScannerCreate] = useState(false)
   const [scannerDeviceId, setScannerDeviceId] = useState<string | null>(null)
@@ -28,7 +34,10 @@ export default function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null)
   const [editName, setEditName] = useState('')
   const [editPrice, setEditPrice] = useState('')
+  const [editCost, setEditCost] = useState('')
   const [editStock, setEditStock] = useState('')
+  const [editMinStock, setEditMinStock] = useState('')
+  const [editMaxStock, setEditMaxStock] = useState('')
   const [editBarcode, setEditBarcode] = useState('')
   const [showScannerEdit, setShowScannerEdit] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
@@ -135,7 +144,7 @@ export default function ProductsPage() {
     e.preventDefault()
     setError(null)
     if (!name) return setError('Name is required')
-    const payload: Record<string, unknown> = { name, price: Number(price || 0), stock: Number(stock || 0), barcode: barcode || null }
+    const payload: Record<string, unknown> = { name, price: Number(price || 0), cost: Number(cost || 0) || 0, stock: Number(stock || 0), min_stock: Number(minStock || 0) || 0, max_stock: Number(maxStock || 0) || 0, barcode: barcode || null }
     try {
       const _did = await (await import('@/lib/devices')).getOrCreateDeviceId()
       const res = await fetchWithAuth('/api/products', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': _did ?? '' }, body: JSON.stringify({ ...payload, deviceId: _did }) })
@@ -145,13 +154,11 @@ export default function ProductsPage() {
         throw new Error((errMsg as string) || 'Create failed')
       }
       setName(''); setPrice(''); setStock('')
+      setMinStock(''); setMaxStock(''); setCost('')
       setBarcode('')
       if (isMobile) setShowCreateModal(false)
       fetchList()
-      // reload after create so other UI reflects changes (give server a moment)
-      try {
-        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
-      } catch (_) {}
+      // no automatic reload — UI is refreshed via fetchList and realtime/polling
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Create failed')
@@ -163,6 +170,9 @@ export default function ProductsPage() {
     setEditName(p.name)
     setEditPrice(String(p.price))
     setEditStock(String(p.stock))
+    setEditMinStock(String((p as any).min_stock ?? ''))
+    setEditMaxStock(String((p as any).max_stock ?? ''))
+    setEditCost(String((p as any).cost ?? ''))
     setEditBarcode(p.barcode || '')
     if (isMobile) setShowEditModal(true)
   }
@@ -172,6 +182,9 @@ export default function ProductsPage() {
     setEditName('')
     setEditPrice('')
     setEditStock('')
+    setEditMinStock('')
+    setEditMaxStock('')
+    setEditCost('')
     if (isMobile) setShowEditModal(false)
   }
 
@@ -180,7 +193,7 @@ export default function ProductsPage() {
     if (!editing) return
     setError(null)
     try {
-      const payload: Record<string, unknown> = { name: editName, price: Number(editPrice || 0), stock: Number(editStock || 0), barcode: editBarcode || null }
+      const payload: Record<string, unknown> = { name: editName, price: Number(editPrice || 0), cost: Number(editCost || 0) || 0, stock: Number(editStock || 0), min_stock: Number(editMinStock || 0) || 0, max_stock: Number(editMaxStock || 0) || 0, barcode: editBarcode || null }
       const res = await fetchWithAuth(`/api/products/${editing.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
       const json: unknown = await res.json()
       if (!res.ok) {
@@ -190,10 +203,7 @@ export default function ProductsPage() {
       if (isMobile) setShowEditModal(false)
       cancelEdit()
       fetchList()
-      // reload after update to ensure UI reflects server state
-      try {
-        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
-      } catch (_) {}
+      // no automatic reload — UI is refreshed via fetchList and realtime/polling
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Update failed')
@@ -217,10 +227,7 @@ export default function ProductsPage() {
       // remove from UI optimistically instead of refetching list
       setProducts(prev => prev.filter(p => p.id !== id))
       if (editing?.id === id) cancelEdit()
-      // reload after delete so other views refresh
-      try {
-        if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000)
-      } catch (_) {}
+      // no automatic reload — UI is refreshed via optimistic update and realtime/polling
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg || 'Delete failed')
@@ -230,17 +237,21 @@ export default function ProductsPage() {
   // category-related UI removed; categories managed separately
 
   return (
-    <div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 items-center mb-6">
-        <div className="space-y-3">
+    <motion.div
+      variants={pageVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-2 items-center mb-8">
+        <div className="space-y-2">
           <div>
-            <h2 className="text-2xl font-semibold">Products</h2>
-            <p className="text-sm text-slate-500">Create and manage products</p>
+            <h2 className="text-3xl font-bold tracking-tight text-stone-900">Products</h2>
+            <p className="text-sm text-stone-500 mt-1">Create and manage your inventory</p>
           </div>
           <div className="w-full max-w-md">
             <input
               type="search"
-              placeholder="Search products by name or barcode"
+              placeholder="Search products..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') {
@@ -249,7 +260,7 @@ export default function ProductsPage() {
                 const exact = products.find(p => (p.barcode && p.barcode.toLowerCase() === q) || p.name.toLowerCase() === q)
                 if (exact) startEdit(exact)
               } }}
-              className="border border-gray-200 rounded-full px-4 h-10 w-full bg-slate-50 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="border border-stone-300 rounded-xl px-4 h-11 w-full bg-white placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-shadow"
             />
           </div>
         </div>
@@ -257,8 +268,8 @@ export default function ProductsPage() {
         <div />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 order-last lg:order-first">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="lg:col-span-2 order-2 lg:order-1">
           <Card className="p-6">
             {loading ? (
               <div className="h-48 animate-pulse bg-white rounded-md" />
@@ -275,54 +286,89 @@ export default function ProductsPage() {
                           <div className="text-xs text-slate-500">{p.barcode ?? '—'}</div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button variant="secondary" className="rounded-full" onClick={() => startEdit(p)}>Edit</Button>
-                          <Button className="rounded-full" onClick={() => handleDelete(p.id)}>Delete</Button>
+                          <Button variant="secondary" className="rounded-full p-2" onClick={() => startEdit(p)} title="Edit" aria-label="Edit product">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 21v-3.75L14.81 5.44a2 2 0 0 1 2.82 0l1.93 1.93a2 2 0 0 1 0 2.82L7.75 21H3z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          </Button>
+                          <Button className="rounded-full p-2" onClick={() => handleDelete(p.id)} title="Delete" aria-label="Delete product">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path d="M3 6h18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M10 11v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M14 11v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                              <rect x="7" y="3" width="10" height="2" rx="1" fill="currentColor" />
+                            </svg>
+                          </Button>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : null}
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm divide-y divide-gray-100">
-                    <thead>
-                      <tr className="bg-white">
-                        <th className="py-3 px-4 text-left text-slate-600">Name</th>
-                        <th className="py-3 px-4 text-left text-slate-600">Barcode</th>
-                        <th className="py-3 px-4 text-right text-slate-600">Price</th>
-                        <th className="py-3 px-4 text-right text-slate-600">Stock</th>
-                        <th className="py-3 px-4 text-right text-slate-600">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {products.map(p => (
-                        <tr key={p.id} className="border-t border-gray-100 hover:bg-slate-50">
-                          <td className="py-4 px-4">{p.name}</td>
-                          <td className="py-4 px-4">{p.barcode ?? '—'}</td>
-                          <td className="py-4 px-4 text-right">{formatCurrency(p.price)}</td>
-                          <td className="py-4 px-4 text-right">{p.stock}</td>
+                <SectionErrorBoundary section="Products List">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-stone-50">
+                        <tr className="border-b-2 border-stone-200">
+                          <th className="py-3 px-4 text-left font-semibold text-stone-700">Name</th>
+                          <th className="py-3 px-4 text-left font-semibold text-stone-700">Barcode</th>
+                          <th className="py-3 px-4 text-right font-semibold text-stone-700">Cost</th>
+                          <th className="py-3 px-4 text-right font-semibold text-stone-700">Price</th>
+                          <th className="py-3 px-4 text-right font-semibold text-stone-700">Min</th>
+                          <th className="py-3 px-4 text-right font-semibold text-stone-700">Max</th>
+                          <th className="py-3 px-4 text-right font-semibold text-stone-700">Stock</th>
+                          <th className="py-3 px-4 text-right font-semibold text-stone-700">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {products.map(p => (
+                        <motion.tr 
+                          key={p.id} 
+                          className="border-t border-stone-100 hover:bg-stone-50"
+                          variants={tableRowVariants}
+                          initial="initial"
+                          whileHover="hover"
+                        >
+                          <td className="py-4 px-4 font-medium text-stone-900">{p.name}</td>
+                          <td className="py-4 px-4 text-stone-600 font-mono text-xs">{p.barcode ?? '—'}</td>
+                          <td className="py-4 px-4 text-right text-stone-700">{formatCurrency((p as any).cost ?? 0)}</td>
+                          <td className="py-4 px-4 text-right font-semibold text-stone-900">{formatCurrency(p.price)}</td>
+                          <td className="py-4 px-4 text-right text-stone-600">{(p as any).min_stock ?? '—'}</td>
+                          <td className="py-4 px-4 text-right text-stone-600">{(p as any).max_stock ?? '—'}</td>
+                          <td className="py-4 px-4 text-right font-medium text-stone-900">{p.stock}</td>
                           <td className="py-4 px-4 text-right">
                             <div className="inline-flex items-center gap-2">
-                              <Button variant="secondary" className="rounded-full" onClick={() => startEdit(p)}>Edit</Button>
-                              <Button className="rounded-full" onClick={() => handleDelete(p.id)}>Delete</Button>
+                              <Button variant="secondary" className="rounded-full p-2" onClick={() => startEdit(p)} title="Edit" aria-label="Edit product">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 21v-3.75L14.81 5.44a2 2 0 0 1 2.82 0l1.93 1.93a2 2 0 0 1 0 2.82L7.75 21H3z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                              </Button>
+                              <Button className="rounded-full p-2" onClick={() => handleDelete(p.id)} title="Delete" aria-label="Delete product">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                  <path d="M3 6h18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                                  <path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                                  <path d="M10 11v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                                  <path d="M14 11v6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                                  <rect x="7" y="3" width="10" height="2" rx="1" fill="currentColor" />
+                                </svg>
+                              </Button>
                             </div>
                           </td>
-                        </tr>
+                        </motion.tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                </SectionErrorBoundary>
               </div>
             )}
           </Card>
         </div>
 
-        <div className="max-w-md w-full lg:col-span-1 order-first lg:order-last">
-          <Card className="p-6">
-            {editing ? (
-              <>
-                <h3 className="text-lg font-semibold mb-3">Edit product</h3>
-                <form onSubmit={handleUpdate} className="space-y-3">
+        <div className="w-full lg:max-w-md lg:col-span-1 order-1 lg:order-2">
+          <SectionErrorBoundary section="Product Form">
+            <Card className="p-6">
+              {editing ? (
+                <>
+                  <h3 className="text-lg font-semibold mb-3">Edit product</h3>
+                  <form onSubmit={handleUpdate} className="space-y-3">
                     <div>
                       <label className="block text-sm text-slate-700 mb-1">Name</label>
                       <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
@@ -337,12 +383,26 @@ export default function ProductsPage() {
                     </div>
                   </div>
                     <div>
-                      <label className="block text-sm text-slate-700 mb-1">Price</label>
+                      <label className="block text-sm text-slate-700 mb-1">Price (sell)</label>
                       <input value={editPrice} onChange={e => setEditPrice(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-700 mb-1">Cost (buy)</label>
+                      <input value={editCost} onChange={e => setEditCost(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
                     </div>
                     <div>
                       <label className="block text-sm text-slate-700 mb-1">Stock</label>
                       <input value={editStock} onChange={e => setEditStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-sm text-slate-700 mb-1">Minimum stock</label>
+                        <input value={editMinStock} onChange={e => setEditMinStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-700 mb-1">Maximum stock</label>
+                        <input value={editMaxStock} onChange={e => setEditMaxStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                      </div>
                     </div>
                   <div className="flex gap-2">
                     <Button>Save</Button>
@@ -367,13 +427,27 @@ export default function ProductsPage() {
                       </button>
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm text-slate-700 mb-1">Price</label>
-                    <input value={price} onChange={e => setPrice(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
-                  </div>
+                    <div>
+                      <label className="block text-sm text-slate-700 mb-1">Price (sell)</label>
+                      <input value={price} onChange={e => setPrice(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-700 mb-1">Cost (buy)</label>
+                      <input value={cost} onChange={e => setCost(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                    </div>
                   <div>
                     <label className="block text-sm text-slate-700 mb-1">Stock</label>
                     <input value={stock} onChange={e => setStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-sm text-slate-700 mb-1">Minimum stock</label>
+                      <input value={minStock} onChange={e => setMinStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-700 mb-1">Maximum stock</label>
+                      <input value={maxStock} onChange={e => setMaxStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                    </div>
                   </div>
                   {error && <div className="text-red-600">{error}</div>}
                   <div>
@@ -382,7 +456,8 @@ export default function ProductsPage() {
                 </form>
               </>
             )}
-          </Card>
+            </Card>
+          </SectionErrorBoundary>
         </div>
       </div>
 
@@ -440,17 +515,31 @@ export default function ProductsPage() {
                       </div>
                     </div>
                     <div className="form-field">
-                      <label>Price</label>
+                      <label>Price (sell)</label>
                       <input value={price} onChange={e => setPrice(e.target.value)} />
+                    </div>
+                    <div className="form-field">
+                      <label>Cost (buy)</label>
+                      <input value={cost} onChange={e => setCost(e.target.value)} />
                     </div>
                     <div className="form-field">
                       <label>Stock</label>
                       <input value={stock} onChange={e => setStock(e.target.value)} />
                     </div>
+                    <div className="form-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div>
+                        <label>Minimum stock</label>
+                        <input value={minStock} onChange={e => setMinStock(e.target.value)} />
+                      </div>
+                      <div>
+                        <label>Maximum stock</label>
+                        <input value={maxStock} onChange={e => setMaxStock(e.target.value)} />
+                      </div>
+                    </div>
                     {error && <div className="muted" style={{ color: 'red' }}>{error}</div>}
                     <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
                       <Button>Create</Button>
-                      <button type="button" className="btn secondary" onClick={() => { setShowCreateModal(false); setName(''); setPrice(''); setStock(''); setBarcode(''); setError(null); }}>Cancel</button>
+                      <button type="button" className="btn secondary" onClick={() => { setShowCreateModal(false); setName(''); setPrice(''); setStock(''); setMinStock(''); setMaxStock(''); setCost(''); setBarcode(''); setError(null); }}>Cancel</button>
                     </div>
                   </form>
                 </Card>
@@ -481,12 +570,26 @@ export default function ProductsPage() {
                       </div>
                     </div>
                     <div className="form-field">
-                      <label>Price</label>
+                      <label>Price (sell)</label>
                       <input value={editPrice} onChange={e => setEditPrice(e.target.value)} />
+                    </div>
+                    <div className="form-field">
+                      <label>Cost (buy)</label>
+                      <input value={editCost} onChange={e => setEditCost(e.target.value)} />
                     </div>
                     <div className="form-field">
                       <label>Stock</label>
                       <input value={editStock} onChange={e => setEditStock(e.target.value)} />
+                    </div>
+                    <div className="form-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div>
+                        <label>Minimum stock</label>
+                        <input value={editMinStock} onChange={e => setEditMinStock(e.target.value)} />
+                      </div>
+                      <div>
+                        <label>Maximum stock</label>
+                        <input value={editMaxStock} onChange={e => setEditMaxStock(e.target.value)} />
+                      </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <Button>Save</Button>
@@ -507,11 +610,6 @@ export default function ProductsPage() {
             <Card>
               <h3 style={{ marginTop: 0 }}>Scan Barcode</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ height: 320 }}>
-                  <div style={{ padding: 12, borderRadius: 8, background: '#fafafa', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ color: '#444', fontSize: 13 }}>Using hardware scanner (keyboard input). Focus the barcode input below and scan — each scan will be typed into the field.</div>
-                  </div>
-                </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     type="text"
@@ -536,11 +634,6 @@ export default function ProductsPage() {
             <Card>
               <h3 style={{ marginTop: 0 }}>Scan Barcode</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ height: 320 }}>
-                  <div style={{ padding: 12, borderRadius: 8, background: '#fafafa', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <div style={{ color: '#444', fontSize: 13 }}>Using hardware scanner (keyboard input). Focus the barcode input below and scan — each scan will be typed into the field.</div>
-                  </div>
-                </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     type="text"
@@ -558,7 +651,7 @@ export default function ProductsPage() {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }
 

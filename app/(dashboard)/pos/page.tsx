@@ -5,18 +5,22 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
+import SectionErrorBoundary from '@/components/ui/SectionErrorBoundary'
 import formatCurrency from '@/lib/format/currency'
 import supabase from '@/lib/supabase/client'
 import fetchWithAuth from '@/lib/fetchWithAuth'
-import { lookupBarcodeCached, cacheBarcode, cacheProduct, addOutboxItem, broadcastDataUpdate } from '@/lib/offlineQueue'
-import OutboxModal from '@/components/pos/OutboxModal'
 import { getOrCreateDeviceId } from '@/lib/devices'
 import BarcodeScanListener from '@/components/scan/BarcodeScanListener'
 import ThermalReceipt from '@/components/print/ThermalReceipt'
 import ReceiptPreview from '@/components/print/ReceiptPreview'
 import { useRef } from 'react'
+import { validateCheckoutForm, validateProductForm, getFieldError } from '@/lib/validation'
+import { usePOSSettings } from '@/lib/usePOSSettings'
+import { useOfflineQueue } from '@/hooks/useOfflineQueue'
+import { startAutoSync, flushOnce } from '@/lib/offlineSync'
+import { cacheProductsList, getCachedProductsList, getAllOutboxItems, updateOutboxStatus, updateOutboxAttempts, cacheBarcode, lookupBarcodeCached } from '@/lib/offlineQueue'
 
-type Product = { id: string; name: string; price: number; stock: number; barcode?: string }
+type Product = { id: string; name: string; price: number; stock: number; barcode?: string; min_stock?: number; max_stock?: number }
 type CartItem = { product: Product; qty: number }
 
 export default function POSPage() {
@@ -44,17 +48,54 @@ export default function POSPage() {
   const [realtimeMessage, setRealtimeMessage] = useState<string | null>(null)
   const [realtimeStatus, setRealtimeStatus] = useState<'idle'|'connecting'|'connected'|'error'|'polling'>('idle')
   const [lastRealtimeAt, setLastRealtimeAt] = useState<number | null>(null)
+  const [subscriptionPlan, setSubscriptionPlan] = useState<string | null>(null)
+  const [subscriptionActive, setSubscriptionActive] = useState<boolean>(true)
+  const { settings, saveSettings } = usePOSSettings()
+  const [layoutMode, setLayoutMode] = useState<'side'|'stacked'>(settings.layout as 'side'|'stacked' || 'side')
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [createProductErrors, setCreateProductErrors] = useState<string | null>(null)
+  const { isOnline, pendingCount, failedCount, queueCheckout } = useOfflineQueue()
+  const [hydrated, setHydrated] = useState(false)
+  const [usingCachedProducts, setUsingCachedProducts] = useState(false)
   const pollTimerRef = useRef<number | null>(null)
   const inspectTimerRef = useRef<number | null>(null)
   const pendingRealtimeRef = useRef<Record<string, unknown>[]>([])
   const realtimeDebounceRef = useRef<number | null>(null)
   const [isMobile, setIsMobile] = useState(false)
   const [showCartModal, setShowCartModal] = useState(false)
-  const [showOutboxModal, setShowOutboxModal] = useState(false)
 
   useEffect(() => {
     // initial load
     fetchProducts()
+
+    // mark hydration complete to avoid SSR/CSR mismatches for offline badges
+    setHydrated(true)
+
+    // Start auto-sync for offline queue
+    const stopSync = startAutoSync({ intervalMs: 30000 })
+
+    // load subscription metadata for UI gating
+    ;(async () => {
+      try {
+        const res = await fetchWithAuth('/api/subscription')
+        if (res.ok) {
+          const sj = await res.json().catch(() => ({}))
+          // normalize plan and active flag
+          const planRaw = (sj?.plan ?? null)
+          const plan = planRaw ? String(planRaw).toLowerCase() : null
+          setSubscriptionPlan(plan === 'advanced' ? 'advance' : plan)
+          setSubscriptionActive(Boolean(sj?.active))
+        } else {
+          // If server rejects, fall back to basic but keep active to allow offline use
+          setSubscriptionPlan('basic')
+          setSubscriptionActive(true)
+        }
+      } catch (_) {
+        // If offline or fetch fails, keep user working: basic + active
+        setSubscriptionPlan(prev => prev ?? 'basic')
+        setSubscriptionActive(true)
+      }
+    })()
 
     // Mobile detection
     const checkMobile = () => {
@@ -70,6 +111,7 @@ export default function POSPage() {
         const cfg = JSON.parse(raw || '{}')
         if (cfg.scannerDeviceId) setScannerDeviceId(cfg.scannerDeviceId)
         if (cfg.scannerMode) setScannerMode(cfg.scannerMode)
+        if (cfg.layout) setLayoutMode(cfg.layout === 'stacked' ? 'stacked' : 'side')
       }
     } catch (_) {}
 
@@ -119,6 +161,7 @@ export default function POSPage() {
     })()
 
     return () => {
+      stopSync()
       try { if (inspectTimerRef.current) window.clearInterval(inspectTimerRef.current) } catch (_) {}
       try {
         // cleanup realtime channel if created
@@ -168,6 +211,18 @@ export default function POSPage() {
   async function fetchProducts(opts?: { skipLoading?: boolean }) {
     const skipLoading = opts?.skipLoading === true
     if (!skipLoading) setLoading(true)
+
+    // If offline, try cached products immediately
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const cached = await getCachedProductsList()
+      if (cached.length > 0) {
+        setProducts(cached as Product[])
+        setUsingCachedProducts(true)
+        if (!skipLoading) setLoading(false)
+        return
+      }
+    }
+
     try {
       // Attach current user's access token so server can scope by shop
       const res = await fetchWithAuth('/api/products')
@@ -177,16 +232,52 @@ export default function POSPage() {
         throw new Error((errMsg as string) || 'Failed to load')
       }
       const obj = typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : {}
-      setProducts((obj['data'] ?? []) as Product[])
+      const list = (obj['data'] ?? []) as Product[]
+      setProducts(list)
+      setUsingCachedProducts(false)
+      // Cache for offline use
+      cacheProductsList(list).catch(err => console.error('Cache products failed:', err))
+      // Cache barcodes for offline lookup
+      Promise.all(
+        list
+          .filter(p => Boolean(p.barcode))
+          .map(p => cacheBarcode(String(p.barcode), p).catch(err => console.error('Cache barcode failed:', err)))
+      ).catch(() => {})
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      if (!skipLoading) setError(msg || 'Failed to load')
+      const cached = await getCachedProductsList()
+      if (cached.length > 0) {
+        setProducts(cached as Product[])
+        setUsingCachedProducts(true)
+        if (!skipLoading) setError('Offline. Showing cached products.')
+      } else {
+        if (!skipLoading) setError(msg || 'Failed to load')
+      }
     } finally {
       if (!skipLoading) setLoading(false)
     }
   }
 
+  function applyLocalStockAdjustments(items: { product_id: string; quantity: number }[]) {
+    setProducts(prev => {
+      const updated = prev.map(p => {
+        const match = items.find(i => i.product_id === p.id)
+        if (!match) return p
+        const newStock = Math.max(0, (p.stock ?? 0) - match.quantity)
+        return { ...p, stock: newStock }
+      })
+      // persist to cache for offline views
+      cacheProductsList(updated).catch(err => console.error('Cache products failed:', err))
+      return updated
+    })
+  }
+
   function addToCart(p: Product) {
+    // Allow offline use even if subscription check failed; only block when we positively know it's inactive while online
+    if (!subscriptionActive && isOnline) {
+      setError('Subscription required or expired')
+      return
+    }
     setCart(prev => {
       const found = prev.find(i => i.product.id === p.id)
       if (found) return prev.map(i => i.product.id === p.id ? { ...i, qty: Math.min(i.qty + 1, p.stock) } : i)
@@ -201,45 +292,45 @@ export default function POSPage() {
       setScanError('Detected empty barcode')
       return
     }
-    // try cached lookup first
-    (async () => {
-      try {
-        const cached = await lookupBarcodeCached(normalized)
-        if (cached) {
-          addToCart(cached)
-          setError(null)
-          setScanError(null)
-          setScanMessage(`${cached.name} added`)
-          setManualBarcode('')
-          setTimeout(() => setScanMessage(null), 1400)
-          return
-        }
-      } catch (e) { console.debug('cache lookup error', e) }
 
-      const prod = products.find(p => p.barcode && String(p.barcode).trim() === normalized)
-      if (prod) {
+    const prod = products.find(p => p.barcode && String(p.barcode).trim() === normalized)
+    if (prod) {
       console.debug('Matched product:', prod.id, prod.name)
       addToCart(prod)
       setError(null)
       setScanError(null)
       setScanMessage(`${prod.name} added`)
       setManualBarcode('')
-      // clear success message after a short delay
       setTimeout(() => setScanMessage(null), 1400)
-        return
-    } else {
-      console.warn('No product found for barcode:', normalized)
-        setScanError(`No product found for barcode: ${normalized}`)
-        setError(`No product found for barcode: ${normalized}`)
-        // If this device is authoritative, open modal to create or assign
-        // Open create modal for any device when barcode not found
-        setPendingBarcodeToCreate(normalized)
-        setCreateName('')
-        setCreatePrice('0')
-        setCreateStock('0')
-        setCreateBarcodeModalOpen(true)
+      return
     }
-    })()
+
+    // Offline fallback for Pro/Advance: lookup cached barcode
+    const isProOrAdvance = (subscriptionPlan === 'pro' || subscriptionPlan === 'advance')
+    if (!isOnline && isProOrAdvance) {
+      lookupBarcodeCached(normalized).then(found => {
+        if (found) {
+          addToCart(found as Product)
+          setError(null)
+          setScanError(null)
+          setScanMessage(`${(found as Product).name} added (cached)`) 
+          setManualBarcode('')
+          setTimeout(() => setScanMessage(null), 1400)
+        } else {
+          setScanError('Barcode not found in cache (offline)')
+        }
+      }).catch(() => setScanError('Barcode lookup failed offline'))
+      return
+    }
+
+    console.warn('No product found for barcode:', normalized)
+    setScanError(`No product found for barcode: ${normalized}`)
+    setError(`No product found for barcode: ${normalized}`)
+    setPendingBarcodeToCreate(normalized)
+    setCreateName('')
+    setCreatePrice('0')
+    setCreateStock('0')
+    setCreateBarcodeModalOpen(true)
   }
 
   function handleManualAdd() {
@@ -283,9 +374,19 @@ export default function POSPage() {
 
   async function performCheckout(payment: number) {
     setCheckingOut(true)
+    setPaymentError(null)
     setError(null)
-    const items = cart.map(i => ({ product_id: i.product.id, quantity: i.qty, price: i.product.price }))
+
+    // Validate payment amount
     const total = computeTotal()
+    const validation = validateCheckoutForm({ paymentAmount: payment, total })
+    if (!validation.valid) {
+      setPaymentError(validation.errors[0]?.message || 'Invalid payment amount')
+      setCheckingOut(false)
+      return
+    }
+
+    const items = cart.map(i => ({ product_id: i.product.id, quantity: i.qty, price: i.product.price }))
     const change = Number((payment - total).toFixed(2))
     const payload: Record<string, unknown> = { items, total, payment_method: 'cash', payment, change }
 
@@ -302,7 +403,6 @@ export default function POSPage() {
       // success: clear cart and refresh products
       setCart([])
       fetchProducts()
-      try { broadcastDataUpdate() } catch (_) {}
 
       // attach payment and change to receipt for display if backend doesn't include them
       const receiptData: unknown = typeof json === 'object' && json !== null ? ((json as Record<string, unknown>)['data'] ?? json) : json
@@ -316,46 +416,55 @@ export default function POSPage() {
       }
       setReceipt((receiptData as Record<string, unknown>) ?? null)
       setShowPaymentModal(false)
-      // after successful checkout, reload the page after 2s to pick up updates
-      try {
-        if (typeof window !== 'undefined') {
-          setTimeout(() => {
-            try { window.location.reload() } catch (_) {}
-          }, 2000)
-        }
-      } catch (_) {}
+      // no forced reload — UI refreshed via fetchProducts and realtime/polling
     } catch (err: unknown) {
-      // If network/offline error, queue checkout for later (offline support)
       const msg = err instanceof Error ? err.message : String(err)
-      const isNavigatorOffline = typeof navigator !== 'undefined' && (navigator as any).onLine === false
-      const looksLikeNetworkError = typeof msg === 'string' && (
-        msg.toLowerCase().includes('failed to fetch') ||
-        msg.toLowerCase().includes('networkerror') ||
-        msg.toLowerCase().includes('network error') ||
-        msg.toLowerCase().includes('network request failed') ||
-        (msg.toLowerCase().includes('request to') && msg.toLowerCase().includes('failed'))
-      )
-      const isNetworkError = isNavigatorOffline || err instanceof TypeError || looksLikeNetworkError
-
-      if (isNetworkError) {
+      
+      // If offline, queue the transaction for later sync
+      if (!isOnline) {
         try {
-          const deviceId = (await getOrCreateDeviceId()) ?? undefined
-          await addOutboxItem('checkout', { items, total, payment_method: 'cash', payment, change }, { deviceId })
-          // clear cart and show queued receipt
+          const _did = await getOrCreateDeviceId()
+          await queueCheckout({ ...payload, deviceId: _did })
+          setPaymentError('No internet connection. Transaction queued and will sync when online.')
+          // Apply local stock decrement to prevent overselling while offline
+          applyLocalStockAdjustments(items)
           setCart([])
-          setReceipt({ queued: true, items, total, payment, change, queuedAt: Date.now() })
           setShowPaymentModal(false)
-          setError('Offline: checkout queued and will sync when online')
-          try { broadcastDataUpdate() } catch (_) {}
-        } catch (qerr) {
-          const qmsg = qerr instanceof Error ? qerr.message : String(qerr)
-          setError(qmsg || 'Checkout failed and could not be queued')
+        } catch (queueErr) {
+          setPaymentError('Failed to queue transaction: ' + (queueErr instanceof Error ? queueErr.message : String(queueErr)))
+          // Keep cart intact on error - don't clear
         }
       } else {
-        setError(msg || 'Checkout failed')
+        setPaymentError(msg || 'Checkout failed')
+        // Keep cart intact on error - don't clear
       }
     } finally {
       setCheckingOut(false)
+    }
+  }
+
+  async function retryFailedSync() {
+    try {
+      const items = await getAllOutboxItems()
+      const failed = items.filter(i => i.status === 'failed')
+      if (failed.length === 0) {
+        setRealtimeMessage('No failed transactions to retry')
+        return
+      }
+
+      await Promise.all(
+        failed.map(i => Promise.all([
+          updateOutboxStatus(i.queueId, 'pending', null),
+          updateOutboxAttempts(i.queueId, 0),
+        ]))
+      )
+
+      setRealtimeMessage('Retrying failed transactions…')
+      await flushOnce()
+      const remaining = (await getAllOutboxItems()).filter(i => i.status === 'failed').length
+      setRealtimeMessage(remaining === 0 ? 'All retries queued' : `${remaining} failed after retry`)
+    } catch (err) {
+      setError('Retry failed: ' + (err instanceof Error ? err.message : String(err)))
     }
   }
 
@@ -367,15 +476,27 @@ export default function POSPage() {
       transition={{ duration: 0.28 }}
       className="min-h-screen bg-gray-50/60 p-6"
     >
-      {/* Realtime diagnostics */}
-      <div className="flex justify-end mb-2">
+      {/* Offline indicator and queued transactions */}
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          {hydrated && (
+            <>
+              {!isOnline && <div className="inline-block px-3 py-1 bg-amber-100 text-amber-900 rounded-lg text-sm font-medium">🔴 Offline</div>}
+              {pendingCount > 0 && <div className="inline-block ml-2 px-3 py-1 bg-blue-100 text-blue-900 rounded-lg text-sm font-medium">{pendingCount} transaction{pendingCount !== 1 ? 's' : ''} queued</div>}
+              {failedCount > 0 && <div className="inline-block ml-2 px-3 py-1 bg-red-100 text-red-900 rounded-lg text-sm font-medium">{failedCount} failed sync</div>}
+              {usingCachedProducts && <div className="inline-block ml-2 px-3 py-1 bg-slate-100 text-slate-800 rounded-lg text-sm font-medium">Cached products</div>}
+            </>
+          )}
+        </div>
         <div className="text-sm text-gray-600">
           Realtime: <strong className={`${realtimeStatus === 'connected' ? 'text-emerald-600' : realtimeStatus === 'polling' ? 'text-amber-600' : realtimeStatus === 'error' ? 'text-red-600' : 'text-gray-700'}`}>{realtimeStatus}</strong>
           {lastRealtimeAt ? <span className="ml-2">Last: {new Date(lastRealtimeAt).toLocaleTimeString()}</span> : null}
         </div>
-        <div className="ml-4">
-          <Button onClick={() => setShowOutboxModal(true)} className="ml-2">Outbox</Button>
-        </div>
+        {hydrated && failedCount > 0 && (
+          <div className="ml-4">
+            <Button variant="secondary" onClick={retryFailedSync}>Retry failed</Button>
+          </div>
+        )}
       </div>
       
       <div className="max-w-7xl mx-auto">
@@ -385,7 +506,7 @@ export default function POSPage() {
           <h2 className="m-0 text-2xl md:text-3xl font-extrabold tracking-tight">Point of Sale</h2>
           <p className="text-gray-500">Quickly add products to the cart and checkout</p>
         </div>
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <Input
             type="search"
             placeholder="Search products by name or barcode"
@@ -399,120 +520,137 @@ export default function POSPage() {
             } }}
               className="w-full max-w-xs md:max-w-md rounded-full shadow-sm ring-1 ring-gray-100 focus:ring-2 focus:ring-emerald-300"
           />
-          <Button onClick={() => setShowScanner(true)} className="ml-2">Scan</Button>
+          {(subscriptionPlan === 'pro' || subscriptionPlan === 'advance') && subscriptionActive && (
+            <Button onClick={() => setShowScanner(true)} className="ml-2">Scan</Button>
+          )}
+          {/* layout toggle stored in server settings */}
+          <div className="ml-2">
+            <button className="px-2 py-1 border rounded" onClick={() => {
+              const next = layoutMode === 'side' ? 'stacked' : 'side'
+              setLayoutMode(next)
+              saveSettings({ layout: next })
+            }}>{layoutMode === 'side' ? 'Side' : 'Stacked'}</button>
+          </div>
         </div>
       </div>
-      <OutboxModal open={showOutboxModal} onClose={() => setShowOutboxModal(false)} />
-      
 
-      <div className="grid gap-6 grid-cols-1 md:grid-cols-[1fr_380px]">
+      <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px]">
         <div>
-          <Card className="p-4 bg-white/80 backdrop-blur-sm">
-            {loading ? (
-              <div className="animate-pulse bg-gray-100 rounded-lg h-60" />
-            ) : error ? (
-              <div className="text-red-600">{error}</div>
-            ) : (
-              <div>
-                {search ? (
-                  <div className="mb-3">
-                    {products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode || '').toLowerCase().includes(search.toLowerCase())).slice(0, 8).map(p => (
-                      <div key={p.id} className="p-3 border-b border-gray-100 flex justify-between items-center hover:bg-gray-50 transition">
-                        <div>
-                          <div className="font-semibold">{p.name}</div>
-                          <div className="text-sm text-gray-400">{p.barcode ?? '—'}</div>
-                        </div>
-                        <div>
-                          <Button onClick={() => { addToCart(p); setSearch('') }} className="px-3 py-1">Add</Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-                {products.map(p => (
-                  <motion.div
-                    key={p.id}
-                    whileHover={{ scale: p.stock > 0 ? 1.02 : 1 }}
-                    transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-                    role={p.stock > 0 ? 'button' : undefined}
-                    tabIndex={p.stock > 0 ? 0 : -1}
-                    onClick={() => { if (p.stock > 0) addToCart(p) }}
-                    onKeyDown={(e) => { if (p.stock > 0 && e.key === 'Enter') addToCart(p) }}
-                    className={`group bg-white rounded-xl border border-gray-100 p-4 cursor-pointer shadow-sm hover:shadow-lg transform transition-all duration-200 ${p.stock <= 0 ? 'opacity-60 cursor-not-allowed grayscale' : ''}`}
-                  >
-                    <div className="font-semibold text-gray-800 group-hover:text-emerald-600">{p.name}</div>
-                    {p.barcode ? <div className="text-sm text-gray-400 mt-1">Barcode: {p.barcode}</div> : null}
-                    <div className="text-lg font-extrabold mt-3">{formatCurrency(p.price)}</div>
-                    <div className="text-sm text-gray-500 mt-1">{p.stock > 0 ? `In stock: ${p.stock}` : 'Out of stock'}</div>
-                  </motion.div>
-                ))}
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {!isMobile && (
-          <div>
-            <Card className="p-4 sticky top-20 bg-white/90 backdrop-blur-sm">
-              <h3 className="mt-0 text-lg font-semibold">Cart</h3>
-              {cart.length === 0 ? (
-                <div className="text-gray-500">Cart is empty</div>
+          <SectionErrorBoundary section="Product List">
+            <Card className="p-4 bg-white/80 backdrop-blur-sm">
+              {loading ? (
+                <div className="animate-pulse bg-gray-100 rounded-lg h-60" />
+              ) : error ? (
+                <div className="text-red-600">{error}</div>
               ) : (
                 <div>
-                  {cart.map(i => (
-                    <div key={i.product.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100 mb-3">
-                      <div className="flex-1">
-                        <div className="font-semibold text-gray-800">{i.product.name}</div>
-                        <div className="text-sm text-gray-500">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <button className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-100" aria-label="Decrease quantity" onClick={() => changeQty(i.product.id, Math.max(1, i.qty - 1))}>−</button>
-                          <input className="w-14 text-center rounded-md border border-gray-200 px-2 py-1" type="number" value={i.qty} min={1} max={i.product.stock} onChange={e => changeQty(i.product.id, Math.max(1, Number(e.target.value) || 1))} />
-                          <button className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-100" aria-label="Increase quantity" onClick={() => changeQty(i.product.id, Math.min(i.product.stock, i.qty + 1))}>+</button>
+                  {search ? (
+                    <div className="mb-3">
+                      {products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || (p.barcode || '').toLowerCase().includes(search.toLowerCase())).slice(0, 8).map(p => (
+                        <div key={p.id} className="p-3 border-b border-gray-100 flex justify-between items-center hover:bg-gray-50 transition">
+                          <div>
+                            <div className="font-semibold">{p.name}</div>
+                            <div className="text-sm text-gray-400">{p.barcode ?? '—'}</div>
+                          </div>
+                          <div>
+                            <Button onClick={() => { addToCart(p); setSearch('') }} className="px-3 py-1">Add</Button>
+                          </div>
                         </div>
-
-                        <button className="w-9 h-9 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50" title="Remove" onClick={() => removeItem(i.product.id)} aria-label="Remove item">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                            <path d="M10 11v6" />
-                            <path d="M14 11v6" />
-                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                          </svg>
-                        </button>
-                      </div>
+                      ))}
                     </div>
+                  ) : null}
+
+                  <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                  {products.map(p => (
+                    <motion.div
+                      key={p.id}
+                      whileHover={{ scale: p.stock > 0 ? 1.02 : 1 }}
+                      transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+                      role={p.stock > 0 ? 'button' : undefined}
+                      tabIndex={p.stock > 0 ? 0 : -1}
+                      onClick={() => { if (p.stock > 0) addToCart(p) }}
+                      onKeyDown={(e) => { if (p.stock > 0 && e.key === 'Enter') addToCart(p) }}
+                      className={`relative group bg-white rounded-xl border border-gray-100 p-4 cursor-pointer shadow-sm hover:shadow-lg transform transition-all duration-200 ${p.stock <= 0 ? 'opacity-60 cursor-not-allowed grayscale' : ''}`}
+                    >
+                      {/* Low stock badge for Pro+ */}
+                      {(subscriptionPlan === 'pro' || subscriptionPlan === 'advance') && subscriptionActive && (p.min_stock ?? 0) >= 0 && p.stock <= (p.min_stock ?? 0) && (
+                        <div className="absolute right-3 top-3 bg-red-600 text-white text-xs px-2 py-1 rounded">Low</div>
+                      )}
+                      <div className="font-semibold text-gray-800 group-hover:text-emerald-600">{p.name}</div>
+                      {p.barcode ? <div className="text-sm text-gray-400 mt-1">Barcode: {p.barcode}</div> : null}
+                      <div className="text-lg font-extrabold mt-3">{formatCurrency(p.price)}</div>
+                      <div className="text-sm text-gray-500 mt-1">{p.stock > 0 ? `In stock: ${p.stock}` : 'Out of stock'}</div>
+                    </motion.div>
                   ))}
-
-                  <div className="mt-3 flex justify-between items-center">
-                    <div className="font-bold">Total</div>
-                    <div className="font-bold">{formatCurrency(computeTotal())}</div>
-                  </div>
-
-                  <div className="mt-3">
-                    <Button onClick={handleCheckout} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
                   </div>
                 </div>
               )}
             </Card>
+          </SectionErrorBoundary>
+        </div>
+
+        {!isMobile && (
+          <div>
+            <SectionErrorBoundary section="Shopping Cart">
+              <Card className="p-4 sticky top-20 bg-white/90 backdrop-blur-sm">
+                <h3 className="mt-0 text-lg font-semibold">Cart</h3>
+                {cart.length === 0 ? (
+                  <div className="text-gray-500">Cart is empty</div>
+                ) : (
+                  <div>
+                    {cart.map(i => (
+                      <div key={i.product.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100 mb-3">
+                        <div className="flex-1">
+                          <div className="font-semibold text-gray-800">{i.product.name}</div>
+                          <div className="text-sm text-gray-500">{formatCurrency(i.product.price * i.qty)} ({i.qty}×)</div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <button className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-100" aria-label="Decrease quantity" onClick={() => changeQty(i.product.id, Math.max(1, i.qty - 1))}>−</button>
+                            <input className="w-14 text-center rounded-md border border-gray-200 px-2 py-1" type="number" value={i.qty} min={1} max={i.product.stock} onChange={e => changeQty(i.product.id, Math.max(1, Number(e.target.value) || 1))} />
+                            <button className="w-9 h-9 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-100" aria-label="Increase quantity" onClick={() => changeQty(i.product.id, Math.min(i.product.stock, i.qty + 1))}>+</button>
+                          </div>
+
+                          <button className="w-9 h-9 rounded-lg border border-gray-200 bg-white flex items-center justify-center hover:bg-gray-50" title="Remove" onClick={() => removeItem(i.product.id)} aria-label="Remove item">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="mt-3 flex justify-between items-center">
+                      <div className="font-bold">Total</div>
+                      <div className="font-bold">{formatCurrency(computeTotal())}</div>
+                    </div>
+
+                    <div className="mt-3">
+                      <Button onClick={handleCheckout} disabled={checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </SectionErrorBoundary>
           </div>
         )}
       </div>
       <Modal open={!!receipt} onClose={() => setReceipt(null)} title="Receipt">
         <div className="w-full max-w-md">
-          <Card>
-            <h3 className="mt-0 text-lg font-semibold">Receipt</h3>
-            {receipt ? (() => {
-                const saleSource = (receipt && ((receipt as Record<string, unknown>)['sale'] ?? receipt)) as Record<string, unknown>
-                const itemsRaw = ((receipt as Record<string, unknown>)['items'] ?? saleSource['items']) as unknown[] | undefined
-                const items = (itemsRaw || []).map((it: unknown) => {
-                  const row = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
-                  return {
+          <SectionErrorBoundary section="Receipt">
+            <Card>
+              <h3 className="mt-0 text-lg font-semibold">Receipt</h3>
+              {receipt ? (() => {
+                  const saleSource = (receipt && ((receipt as Record<string, unknown>)['sale'] ?? receipt)) as Record<string, unknown>
+                  const itemsRaw = ((receipt as Record<string, unknown>)['items'] ?? saleSource['items']) as unknown[] | undefined
+                  const items = (itemsRaw || []).map((it: unknown) => {
+                    const row = (typeof it === 'object' && it !== null) ? (it as Record<string, unknown>) : {}
+                    return {
                     name: (row['name'] ?? row['product_name'] ?? row['product_id'] ?? 'Item') as string,
                     qty: Number(row['quantity'] ?? row['qty'] ?? 1),
                     price: Number((row['price'] ?? row['unit_price'] ?? 0) || 0),
@@ -548,10 +686,11 @@ export default function POSPage() {
                 )
               })() : null}
 
-            <div className="mt-3 flex justify-end gap-2">
-              <Button onClick={() => { setReceipt(null) }}>Close</Button>
-            </div>
-          </Card>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button onClick={() => { setReceipt(null) }}>Close</Button>
+              </div>
+            </Card>
+          </SectionErrorBoundary>
         </div>
       </Modal>
 
@@ -627,34 +766,67 @@ export default function POSPage() {
         <div className="w-full max-w-md">
           <Card>
             <h3 className="mt-0 text-lg font-semibold">Scan Barcode</h3>
-            <div className="flex flex-col gap-2">
-              <div className="h-[320px]">
-                <div className="p-3 rounded-md bg-gray-50 h-full flex items-center justify-center">
-                  <div className="text-gray-700 text-sm">Using hardware scanner (keyboard input). Focus the barcode input below and scan — each scan will be typed into the field.</div>
+            <div className="flex flex-col gap-4">
+              <div className="flex-1">
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="text"
+                    placeholder="Type or paste barcode, press Enter"
+                    value={manualBarcode}
+                    onChange={e => setManualBarcode(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleManualAdd() }}
+                    className="flex-1"
+                    autoFocus
+                  />
+                  <Button onClick={handleManualAdd} disabled={!subscriptionActive}>Add</Button>
+                </div>
+
+                {/* Hidden barcode listener for keyboard scanner devices */}
+                {showScanner && scannerMode === 'keyboard' && (
+                  <BarcodeScanListener enabled={!!(subscriptionActive && (subscriptionPlan === 'pro' || subscriptionPlan === 'advance') && showScanner)} onScan={(c) => handleBarcodeDetected(c)} endKey="Enter" />
+                )}
+
+                <div className="min-h-[20px] mt-2">
+                  {scanError && <div className="text-red-600 text-sm">{scanError}</div>}
+                  {scanMessage && <div className="text-emerald-800 text-sm">{scanMessage}</div>}
                 </div>
               </div>
 
-              <div className="flex gap-2 items-center">
-                <Input
-                  type="text"
-                  placeholder="Type or paste barcode, press Enter"
-                  value={manualBarcode}
-                  onChange={e => setManualBarcode(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleManualAdd() }}
-                  className="flex-1"
-                  autoFocus
-                />
-                <Button onClick={handleManualAdd}>Add</Button>
-              </div>
+              <div className="w-full mt-4">
+                <Card>
+                  <h4 className="m-0 text-sm font-semibold">Cart Preview</h4>
+                  {cart.length === 0 ? (
+                    <div className="text-gray-500 text-sm mt-2">Cart is empty</div>
+                  ) : (
+                    <>
+                      <div className="mt-2 max-h-[220px] overflow-y-auto pr-2 space-y-2">
+                        {cart.map(i => (
+                          <div key={i.product.id} className="flex items-center justify-between gap-3 p-2 rounded-md bg-gray-50 border border-gray-100">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{i.product.name}</div>
+                              <div className="text-xs text-gray-500">{formatCurrency(i.product.price)} × {i.qty}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-200 bg-white" onClick={() => changeQty(i.product.id, Math.max(1, i.qty - 1))}>−</button>
+                              <div className="text-sm w-8 text-center">{i.qty}</div>
+                              <button className="w-7 h-7 flex items-center justify-center rounded-md border border-gray-200 bg-white" onClick={() => changeQty(i.product.id, Math.min(i.product.stock, i.qty + 1))}>+</button>
+                              <button className="ml-2 text-gray-500" title="Remove" onClick={() => removeItem(i.product.id)}>✕</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
 
-              {/* Hidden barcode listener for keyboard scanner devices */}
-              {showScanner && scannerMode === 'keyboard' && (
-                <BarcodeScanListener enabled={showScanner} onScan={(c) => handleBarcodeDetected(c)} endKey="Enter" />
-              )}
+                      <div className="mt-2 flex justify-between items-center">
+                        <div className="font-semibold">Total</div>
+                        <div className="font-semibold">{formatCurrency(computeTotal())}</div>
+                      </div>
 
-              <div className="min-h-[20px]">
-                {scanError && <div className="text-red-600 text-sm">{scanError}</div>}
-                {scanMessage && <div className="text-emerald-800 text-sm">{scanMessage}</div>}
+                      <div className="mt-2 flex justify-end">
+                        <Button onClick={() => { handleCheckout(); setShowScanner(false) }} disabled={!subscriptionActive || checkingOut}>{checkingOut ? 'Processing...' : 'Checkout'}</Button>
+                      </div>
+                    </>
+                  )}
+                </Card>
               </div>
             </div>
 
@@ -669,59 +841,67 @@ export default function POSPage() {
         <div className="w-full max-w-md">
           <Card>
             <h3 className="mt-0 text-lg font-semibold">Create product and assign barcode</h3>
-            <div className="flex flex-col gap-2 mt-2">
+            <div className="flex flex-col gap-3 mt-2">
               <div className="text-sm text-gray-600">Barcode: <strong>{pendingBarcodeToCreate}</strong></div>
-              <Input placeholder="Product name" value={createName} onChange={e => setCreateName(e.target.value)} />
-              <Input placeholder="Price" type="number" value={createPrice} onChange={e => setCreatePrice(e.target.value)} />
-              <Input placeholder="Stock" type="number" value={createStock} onChange={e => setCreateStock(e.target.value)} />
+
+              <div>
+                <label className="block text-sm text-slate-700 mb-1">Name</label>
+                <input value={createName} onChange={e => setCreateName(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" />
+                <div className="text-xs text-gray-500">This is the display name shown on receipts and the product list.</div>
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-700 mb-1">Price (sell)</label>
+                <input value={createPrice} onChange={e => setCreatePrice(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" type="number" inputMode="decimal" min="0" step="0.01" />
+                <div className="text-xs text-gray-500">Enter price in your store currency (decimals allowed).</div>
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-700 mb-1">Stock</label>
+                <input value={createStock} onChange={e => setCreateStock(e.target.value)} className="w-full border border-gray-200 rounded-lg px-4 h-11 bg-white" type="number" inputMode="numeric" min="0" step="1" />
+                <div className="text-xs text-gray-500">Initial quantity available for sale (whole numbers).</div>
+              </div>
             </div>
 
             <div className="mt-3 flex justify-end gap-2">
               <Button onClick={() => setCreateBarcodeModalOpen(false)}>Cancel</Button>
               <Button onClick={async () => {
+                setError('')
+                setCreateProductErrors('')
                 const code = pendingBarcodeToCreate
                 if (!code) return
+
+                // Validate form using validation utility
+                const validation = validateProductForm({
+                  name: createName,
+                  price: createPrice,
+                  stock: createStock,
+                })
+                if (!validation.valid) {
+                  setCreateProductErrors(validation.errors.map(e => e.message).join('; '))
+                  return
+                }
+
                 // attempt online create first
                 try {
-                  const payload = { code, name: createName || `Item ${code}`, price: Number(createPrice || 0), stock: Number(createStock || 0) }
+                  const priceNum = Number(createPrice || 0)
+                  const stockNum = Math.floor(Number(createStock || 0) || 0)
+                  const payload = { name: createName || `Item ${code}`, price: priceNum, stock: stockNum, barcode: String(code) }
                   const _did = await getOrCreateDeviceId()
-                  const res = await fetchWithAuth('/api/products/create-with-barcode', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': _did ?? '' }, body: JSON.stringify({ ...payload, device_id: _did }) })
+                  const res = await fetchWithAuth('/api/products', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': _did ?? '' }, body: JSON.stringify({ ...payload, deviceId: _did }) })
                   const json = await res.json()
                   if (!res.ok) throw new Error((json && (json as any).error) || 'Failed')
-                  // cache product and barcode
-                  try { await cacheProduct((json as any).product); await cacheBarcode(code, (json as any).product) } catch (_) {}
-                  // add to products list locally
+                  // refresh products list
                   fetchProducts()
-                  try { broadcastDataUpdate() } catch (_) {}
                   setCreateBarcodeModalOpen(false)
                 } catch (err) {
-                  // offline: queue create product + barcode assignment
-                    try {
-                    const tempId = (globalThis.crypto as any)?.randomUUID?.() ?? Math.random().toString(36).slice(2)
-                    const productPayload = { id: tempId, name: createName || `Item ${code}`, price: Number(createPrice || 0), stock: Number(createStock || 0) }
-                    await cacheProduct(productPayload)
-                    await cacheBarcode(code, productPayload)
-                    // outbox: create product then assign barcode
-                      try {
-                      const deviceId = (await getOrCreateDeviceId()) ?? undefined
-                      await addOutboxItem('create_product', { product: productPayload }, { deviceId })
-                      await addOutboxItem('assign_barcode', { code, product_id: tempId }, { deviceId })
-                    } catch (e) {
-                      // fallback: queue without deviceId
-                      await addOutboxItem('create_product', { product: productPayload })
-                      await addOutboxItem('assign_barcode', { code, product_id: tempId })
-                    }
-                    // update UI
-                    setCreateBarcodeModalOpen(false)
-                    fetchProducts()
-                    try { broadcastDataUpdate() } catch (_) {}
-                  } catch (e) {
-                    console.error('Failed to queue product creation', e)
-                    setError('Failed to queue product creation')
-                  }
+                  console.error('Create product failed', err)
+                  const msg = err instanceof Error ? err.message : String(err)
+                  setError(msg || 'Create product failed')
                 }
               }}>Create & Assign</Button>
             </div>
+            {createProductErrors && <div className="text-red-600 text-sm mt-2">{createProductErrors}</div>}
           </Card>
         </div>
       </Modal>
@@ -732,26 +912,25 @@ export default function POSPage() {
             <h3 className="mt-0 text-lg font-semibold">Payment</h3>
             <div className="mb-2">Total: <strong>{formatCurrency(computeTotal())}</strong></div>
 
-            <div className="mb-3">
-              <div className="text-sm mb-2">Amount paid</div>
+            <div className="mb-3">              <div className="text-sm mb-2">Amount paid</div>
               <Input
                 type="number"
                 inputMode="decimal"
                 value={paymentAmount}
-                onChange={e => setPaymentAmount(e.target.value)}
+                onChange={e => { setPaymentAmount(e.target.value); setPaymentError(null) }}
                 className="w-full"
               />
+              {paymentError && <div className="text-red-600 text-sm mt-1">{paymentError}</div>}
             </div>
 
             <div className="mb-3">Change: <strong>{paymentAmount ? formatCurrency(Math.max(0, Number(paymentAmount) - computeTotal())) : formatCurrency(0)}</strong></div>
 
               <div className="flex gap-2 justify-end">
-              <Button onClick={() => { setShowPaymentModal(false) }}>Cancel</Button>
+              <Button onClick={() => { setShowPaymentModal(false); setPaymentError(null) }}>Cancel</Button>
               <Button onClick={async () => {
                   try {
                     await performCheckout(Number(paymentAmount || 0))
-                    // wait 2s then reload to pick up updates
-                    try { if (typeof window !== 'undefined') setTimeout(() => { try { window.location.reload() } catch (_) {} }, 2000) } catch (_) {}
+                    // Do not force a full-page reload; UI is updated via fetchProducts/realtime
                   } catch (e) {
                     // performCheckout handles errors; no-op here
                   }

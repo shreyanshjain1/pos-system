@@ -37,6 +37,9 @@ BEGIN
   END IF;
 END$$;
 
+-- Ensure shop names are unique (case-insensitive)
+CREATE UNIQUE INDEX IF NOT EXISTS shops_name_lower_idx ON shops (lower(name));
+
 -- 4) Example Row-Level Security (RLS) policies
 -- IMPORTANT: Review and adapt these policies for your auth model.
 -- Enable RLS on tenant tables

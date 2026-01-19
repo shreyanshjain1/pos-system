@@ -1,11 +1,23 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getRetailShopAndSubscriptionByShopId } from '@/lib/subscription/retailGuard'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 type SupabaseAuthLike = { getUser: (token: string) => Promise<{ data?: unknown; error?: unknown }> }
 type SupabaseUserData = { user?: { id?: string } }
 
 export async function POST(req: Request) {
   try {
+    // Rate limiting: max 30 checkouts per minute per IP
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown'
+    const rateCheck = checkRateLimit(ip, 30, 60 * 1000)
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)) } }
+      )
+    }
+
     const body: unknown = await req.json()
     if (typeof body !== 'object' || body === null) return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
     const { items, total, payment_method } = body as Record<string, unknown>
@@ -34,6 +46,21 @@ export async function POST(req: Request) {
     }
     // Require a shop mapping for checkout
     if (!shopId) return NextResponse.json({ error: 'No shop mapping' }, { status: 403 })
+
+    // Enforce retail subscription for the authenticated user (owner/cashier)
+    try {
+      if (userId) {
+        const { getSubscriptionStatus } = await import('@/lib/subscription')
+        const status = await getSubscriptionStatus(supabase, userId)
+        if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+        if ((String(status.pos_type || '').toLowerCase()) !== 'retail') return NextResponse.json({ error: 'Not a retail subscription' }, { status: 403 })
+      } else {
+        return NextResponse.json({ error: 'Missing authentication' }, { status: 401 })
+      }
+    } catch (e) {
+      console.warn('Checkout: subscription check error', e)
+      return NextResponse.json({ error: 'Subscription check error' }, { status: 500 })
+    }
 
     // Enforce device authorization for checkout writes. Client must provide device id via `x-device-id` header or `deviceId` in body.
     const deviceIdFromHeader = req.headers.get('x-device-id') || null

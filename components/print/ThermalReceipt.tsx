@@ -197,14 +197,7 @@ export default function ThermalReceipt({ sale }: { sale: Sale }) {
       } catch (err) {
         // ignore
       }
-      // reload the current page a short time after printing so UI updates propagate
-      try {
-        if (typeof window !== 'undefined') {
-          setTimeout(() => {
-            try { window.location.reload() } catch (_) {}
-          }, 2000)
-        }
-      } catch (_) {}
+      // no forced reload after printing; UI updates should be handled via state/realtime
     }, 300)
   }
 

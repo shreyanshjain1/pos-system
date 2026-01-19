@@ -1,8 +1,19 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 export async function POST(req: Request) {
   try {
+    // Rate limiting: max 100 barcode assignments per minute per IP
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown'
+    const rateCheck = checkRateLimit(ip, 100, 60 * 1000)
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)) } }
+      )
+    }
+
     const body: unknown = await req.json()
     if (typeof body !== 'object' || body === null) return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
     const { shop_id, device_id, code, product_id } = body as Record<string, unknown>

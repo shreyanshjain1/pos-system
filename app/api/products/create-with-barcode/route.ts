@@ -38,9 +38,17 @@ export async function POST(req: Request) {
     }
 
     // create product and barcode in a transaction (two inserts)
-    const productPayload = { shop_id: shopId, name: String(name), price: Number(price || 0), stock: Number(stock || 0) }
-    const { data: product, error: prodErr } = await supabaseAdmin.from('products').insert([productPayload]).select('id,name,price,stock,created_at').maybeSingle()
-    if (prodErr || !product) return NextResponse.json({ error: prodErr?.message ?? 'Failed to create product' }, { status: 500 })
+    const productPayload = { shop_id: shopId, name: String(name), price: Number(price || 0), cost: Number((body as any).cost || 0) || 0, stock: Number(stock || 0), min_stock: Number((body as any).min_stock || 0) || 0, max_stock: Number((body as any).max_stock || null) || null, sku: (body as any).sku ?? null, images: (body as any).images ?? [] }
+    const { data: product, error: prodErr } = await supabaseAdmin.from('products').insert([productPayload]).select('id,name,price,cost,stock,min_stock,max_stock,images,sku,created_at').maybeSingle()
+    if (prodErr) {
+      const code = (prodErr as any)?.code
+      const msg = String((prodErr as any)?.message || '')
+      if (code === '23505' || /unique/i.test(msg)) {
+        return NextResponse.json({ error: 'Barcode already exists for this shop' }, { status: 400 })
+      }
+      return NextResponse.json({ error: prodErr?.message ?? 'Failed to create product' }, { status: 500 })
+    }
+    if (!product) return NextResponse.json({ error: 'Failed to create product' }, { status: 500 })
 
     const barcodePayload = { shop_id: shopId, product_id: product.id, code: String(code), device_id: String(device_id) }
     const { data: barcode, error: barErr } = await supabaseAdmin.from('barcodes').insert([barcodePayload]).select('*').maybeSingle()

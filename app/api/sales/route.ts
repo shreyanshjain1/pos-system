@@ -14,6 +14,8 @@ export async function GET(req: Request) {
     const supabase = getSupabaseAdmin()
 
     const from = (page - 1) * pageSize
+    const dateFrom = url.searchParams.get('from') || ''
+    const dateTo = url.searchParams.get('to') || ''
 
     // Determine user's shop scope
     const authHeader = req.headers.get('authorization') || ''
@@ -49,27 +51,51 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'No shop mapping' }, { status: 403 })
     }
 
-    // Check subscription for the caller (require active subscription)
-    try {
-      const authHeader2 = req.headers.get('authorization') || ''
-      if (authHeader2.startsWith('Bearer ')) {
-        const token = authHeader2.split(' ')[1]
-        const { data: authData } = await (supabase.auth as unknown as SupabaseAuthLike).getUser(token)
-        const userId = (authData as unknown as SupabaseUserData)?.user?.id
-        if (userId) {
-          const status = await getSubscriptionStatus(supabase, userId)
-          if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
-        }
-      }
-    } catch (e) {
-      console.warn('Sales: subscription check error', e)
+    // Apply optional date filters (expecting YYYY-MM-DD)
+    if (dateFrom) {
+      // include start of day
+      const fromIso = `${dateFrom}T00:00:00Z`
+      query = query.gte('created_at', fromIso)
     }
+    if (dateTo) {
+      // include end of day
+      const toIso = `${dateTo}T23:59:59Z`
+      query = query.lte('created_at', toIso)
+    }
+
+    // Read-only sales listing — allow even if subscription missing/expired.
 
     const { data, error, count } = await query
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({ data, count })
+    // Also compute totals across the filtered result set (not just the page)
+    try {
+      let totalsQuery = supabase
+        .from('sales')
+        .select('id, total, sale_items(quantity)')
+        .order('created_at', { ascending: false })
+
+      if (shopIds.length > 0) totalsQuery = totalsQuery.in('shop_id', shopIds)
+      if (dateFrom) totalsQuery = totalsQuery.gte('created_at', `${dateFrom}T00:00:00Z`)
+      if (dateTo) totalsQuery = totalsQuery.lte('created_at', `${dateTo}T23:59:59Z`)
+
+      const { data: allData } = await totalsQuery
+      let totalPayment = 0
+      let totalItems = 0
+      if (Array.isArray(allData)) {
+        for (const s of allData as any[]) {
+          totalPayment += Number(s.total ?? 0)
+          const items = Array.isArray(s.sale_items) ? s.sale_items : []
+          for (const it of items) totalItems += Number(it.quantity ?? 0)
+        }
+      }
+
+      return NextResponse.json({ data, count, totals: { total_payment: totalPayment, total_items: totalItems } })
+    } catch (e) {
+      // if totals computation fails, still return page data
+      return NextResponse.json({ data, count })
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Server error'
     return NextResponse.json({ error: message }, { status: 500 })

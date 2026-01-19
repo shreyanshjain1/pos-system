@@ -1,8 +1,10 @@
 import React from 'react'
 import Layout from '@/components/layout/Layout'
+import ErrorBoundary from '@/components/ui/ErrorBoundary'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { getSupabaseAdmin } from '@/lib/supabase/server'
+import { getSubscriptionStatus } from '@/lib/subscription'
 
 export const metadata = {
   title: 'Dashboard'
@@ -39,12 +41,26 @@ export default async function DashboardLayout({ children }: { children: React.Re
     if (!shops || shops.length === 0) {
       redirect('/onboard')
     }
+    // If shop is retail, enforce the authenticated user's subscription (owner)
+    try {
+      const shop = shops[0]
+      if (shop?.pos_type && String(shop.pos_type).toLowerCase() === 'retail') {
+        const status = await getSubscriptionStatus(admin, userId ?? '')
+        if (!status.active || String(status.pos_type || '').toLowerCase() !== 'retail') {
+          redirect('/subscription')
+        }
+      }
+    } catch (_) {
+      // ignore guard errors and allow layout to render; API endpoints will still enforce
+    }
   } catch (e) {
     // On error, continue rendering the dashboard layout without forcing a login
     // redirect. Client-side code can surface auth state and guide the user.
   }
 
   return (
-    <Layout>{children}</Layout>
+    <ErrorBoundary level="page">
+      <Layout>{children}</Layout>
+    </ErrorBoundary>
   )
 }

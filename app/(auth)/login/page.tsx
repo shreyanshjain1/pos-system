@@ -5,6 +5,8 @@ import { registerDeviceWithServer } from '@/lib/devices'
 import { useRouter } from 'next/navigation'
 import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
+import { motion } from 'framer-motion'
+import { pageVariants, transitions } from '@/lib/motion'
 
 export default function LoginPage() {
 	const [email, setEmail] = useState('')
@@ -117,77 +119,139 @@ export default function LoginPage() {
 		// debug helpers removed
 
 	return (
-		<main className="min-h-screen flex items-center justify-center py-12 bg-slate-50">
-			<div className="w-full max-w-7xl px-6">
+		<main className="min-h-screen flex items-center justify-center py-12 bg-stone-50">
+			<motion.div 
+				className="w-full max-w-7xl px-6"
+				variants={pageVariants}
+				initial="hidden"
+				animate="visible"
+			>
 				<div className="bg-white rounded-2xl shadow-lg overflow-hidden grid grid-cols-1 md:grid-cols-12">
 					{/* Left visual panel */}
-					<div className="md:col-span-7 bg-gradient-to-br from-emerald-600 to-emerald-400 text-white p-12 md:p-16 flex flex-col justify-center">
-						<div className="max-w-lg">
-							<div className="w-16 h-16 rounded-full bg-white/20 mb-6 flex items-center justify-center text-2xl font-bold">B</div>
-							<h3 className="text-3xl md:text-4xl font-bold leading-tight mb-4">Welcome back</h3>
-							<p className="text-md md:text-lg opacity-90">Manage sales, inventory and reporting with your POS. Please sign in to continue to your dashboard and point-of-sale.</p>
+					<motion.div 
+						className="md:col-span-7 bg-gradient-to-br from-emerald-600 to-emerald-700 text-white p-12 md:p-16 flex flex-col justify-center"
+						initial={{ opacity: 0, x: -40 }}
+						animate={{ opacity: 1, x: 0 }}
+						transition={transitions.standard}
+					>
+						<div className="max-w-lg space-y-6">
+							<motion.div 
+								className="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center text-2xl font-bold"
+								whileHover={{ scale: 1.05 }}
+							>
+								R
+							</motion.div>
+							<div>
+								<h3 className="text-4xl font-bold leading-tight mb-4">Welcome back</h3>
+								<p className="text-lg opacity-90">Manage sales, inventory and reporting with your POS. Sign in to access your dashboard.</p>
+							</div>
 						</div>
-					</div>
+					</motion.div>
 
 					{/* Right form panel */}
-					<div className="md:col-span-5 p-8 md:p-12 flex items-center">
+					<motion.div 
+						className="md:col-span-5 p-8 md:p-12 flex items-center"
+						initial={{ opacity: 0, x: 40 }}
+						animate={{ opacity: 1, x: 0 }}
+						transition={transitions.standard}
+					>
 						<div className="w-full">
-							<h2 className="text-2xl md:text-3xl font-semibold mb-1">Sign in</h2>
-							<p className="text-sm text-slate-500 mb-6">Sign in to access your POS</p>
+							<h2 className="text-3xl font-bold mb-2 text-stone-900">Sign in</h2>
+							<p className="text-sm text-stone-500 mb-8">Access your POS system</p>
 
 							<form className="space-y-5" onSubmit={handleLogin}>
-								<div>
-									<label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
+								<motion.div
+									initial={{ opacity: 0, y: 10 }}
+									animate={{ opacity: 1, y: 0 }}
+									transition={{ delay: 0.1 }}
+								>
+									<label className="block text-sm font-medium text-stone-900 mb-2">Email</label>
 									<Input
-										placeholder="Enter your email"
+										placeholder="you@example.com"
 										type="email"
 										value={email}
 										onChange={e => setEmail(e.target.value)}
 										required
-										className="bg-slate-50 py-3 text-base"
+										className="bg-stone-50 py-3 text-base"
 									/>
-								</div>
+								</motion.div>
 
-								<div>
-									<label className="block text-sm font-medium text-slate-700 mb-2">Password</label>
+								<motion.div
+									initial={{ opacity: 0, y: 10 }}
+									animate={{ opacity: 1, y: 0 }}
+									transition={{ delay: 0.15 }}
+								>
+									<label className="block text-sm font-medium text-stone-900 mb-2">Password</label>
 									<Input
-										placeholder="Enter your password"
+										placeholder="••••••••"
 										type="password"
 										value={password}
 										onChange={e => setPassword(e.target.value)}
 										required
-										className="bg-slate-50 py-3 text-base"
+										className="bg-stone-50 py-3 text-base"
 									/>
-								</div>
+								</motion.div>
 
-								<div className="flex items-center justify-between">
-									<label className="flex items-center gap-3">
-										<input id="remember" type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="h-4 w-4 rounded border-gray-300" />
-										<span className="text-sm text-slate-700">Remember me</span>
+								<motion.div 
+									className="flex items-center justify-between"
+									initial={{ opacity: 0 }}
+									animate={{ opacity: 1 }}
+									transition={{ delay: 0.2 }}
+								>
+									<label className="flex items-center gap-2">
+										<input id="remember" type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} className="h-4 w-4 rounded border-stone-300 text-emerald-600" />
+										<span className="text-sm text-stone-700">Remember me</span>
 									</label>
-									<button type="button" className="text-indigo-600 hover:underline text-sm" onClick={() => alert('Forgot password flow not implemented')}>Forgot password?</button>
-								</div>
+									<button type="button" className="text-emerald-600 hover:text-emerald-700 text-sm font-medium" onClick={() => alert('Forgot password flow not implemented')}>Forgot password?</button>
+								</motion.div>
 
 								{error && (
-									<div className="text-red-600 text-sm">
+									<motion.div 
+										className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm"
+										initial={{ opacity: 0, y: -10 }}
+										animate={{ opacity: 1, y: 0 }}
+									>
 										<pre className="whitespace-pre-wrap text-xs">{error}</pre>
-									</div>
+									</motion.div>
 								)}
 
-								<div>
-									<Button type="submit" className="w-full h-14 text-base rounded-lg" disabled={loading}>{loading ? 'Signing in…' : 'Sign In'}</Button>
-								</div>
+								<motion.div
+									initial={{ opacity: 0, y: 10 }}
+									animate={{ opacity: 1, y: 0 }}
+									transition={{ delay: 0.25 }}
+								>
+									<Button type="submit" className="w-full h-12 text-base rounded-xl font-medium" disabled={loading}>
+										{loading ? (
+											<span className="flex items-center justify-center gap-2">
+												<svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+													<circle cx="12" cy="12" r="10" strokeWidth="2" opacity="0.25" fill="none" />
+													<path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+												</svg>
+												Signing in…
+											</span>
+										) : 'Sign In'}
+									</Button>
+								</motion.div>
 
-
-
-								{/* debug buttons removed */}
-
-								<p className="text-center text-sm text-slate-600">Don&apos;t have an account? <button type="button" className="text-indigo-600 font-medium" onClick={() => router.push('/signup')}>Sign up</button></p>
+								<motion.p 
+									className="text-center text-sm text-stone-600"
+									initial={{ opacity: 0 }}
+									animate={{ opacity: 1 }}
+									transition={{ delay: 0.3 }}
+								>
+									Don&apos;t have an account? <motion.button 
+										type="button" 
+										className="text-emerald-600 font-medium hover:text-emerald-700" 
+										onClick={() => router.push('/signup')}
+										whileHover={{ scale: 1.05 }}
+										whileTap={{ scale: 0.95 }}
+									>Sign up</motion.button>
+								</motion.p>
 							</form>
 						</div>
-					</div>
+					</motion.div>
 				</div>
-			</div>
+			</motion.div>
 		</main>
 	)
 }

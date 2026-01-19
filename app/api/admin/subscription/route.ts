@@ -27,15 +27,35 @@ export async function POST(req: Request) {
 
     const body: unknown = await req.json().catch(() => ({} as unknown))
     const bodyRec = body as unknown as Record<string, unknown>
-    const user_id = bodyRec?.user_id as string | undefined
+    const id = bodyRec?.id as string | undefined
+    let user_id = bodyRec?.user_id as string | undefined
+    const shop_name = bodyRec?.shop_name as string | undefined
     const plan = bodyRec?.plan ?? null
     const expiry_date = bodyRec?.expiry_date ?? null
+    const pos_type = bodyRec?.pos_type ?? null
 
-    if (!user_id) return NextResponse.json({ error: 'Missing user_id' }, { status: 400 })
+    // If caller provided a shop name instead of a user_id, resolve owner_user_id from shops
+    if (!user_id && shop_name) {
+      try {
+        const { data: shopRec, error: shopErr } = await supabaseAdmin
+          .from('shops')
+          .select('owner_user_id')
+          .eq('name', shop_name)
+          .maybeSingle()
+
+        if (shopErr) throw shopErr
+        const owner = (shopRec as unknown as { owner_user_id?: string })?.owner_user_id
+        if (owner) user_id = owner
+      } catch (e) {
+        console.warn('admin/subscription: shop lookup failed', e)
+      }
+    }
+
+    if (!user_id) return NextResponse.json({ error: 'Missing user_id (or shop_name not found)' }, { status: 400 })
 
     // Upsert subscription: since `user_id` may not have a unique constraint,
     // perform select -> update or insert to avoid ON CONFLICT errors.
-    const payload: Record<string, unknown> = { user_id, plan: plan, expiry_date: expiry_date }
+    const payload: Record<string, unknown> = { user_id, plan: plan, expiry_date: expiry_date, pos_type }
 
     // check if a subscription exists for this user
     const { data: existing, error: selectErr } = await supabaseAdmin
@@ -52,7 +72,7 @@ export async function POST(req: Request) {
     if (existing && (existing as unknown as { id?: string }).id) {
       const { data: updated, error: updateErr } = await supabaseAdmin
         .from('user_subscriptions')
-        .update({ plan: payload.plan, expiry_date: payload.expiry_date })
+        .update({ plan: payload.plan, expiry_date: payload.expiry_date, pos_type: payload.pos_type })
         .eq('user_id', user_id)
         .select()
 

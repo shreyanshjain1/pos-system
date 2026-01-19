@@ -5,6 +5,7 @@ import Topbar from './Topbar'
 import { SidebarProvider } from './SidebarContext'
 import { supabase } from '@/lib/supabase/client'
 import { ShopProvider } from '@/components/context/ShopContext'
+import { OfflineIndicator } from '@/components/ui/OfflineIndicator'
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false)
@@ -31,7 +32,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="flex h-screen text-sm">
+    <div className="flex h-screen text-sm bg-stone-50">
       <SidebarProvider>
         <ShopProvider>
           {authed && <Sidebar />}
@@ -39,10 +40,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex-1 flex flex-col min-h-0">
             {authed && <Topbar />}
 
-            <main className="flex-1 overflow-auto bg-slate-50">
-              <div className="container py-8">{children}</div>
+            <main className="flex-1 overflow-auto bg-stone-50">
+              <div className="container py-4 px-4 sm:py-6 sm:px-6 lg:py-8 max-w-[1400px]">{children}</div>
             </main>
           </div>
+
+          <OfflineIndicator />
         </ShopProvider>
       </SidebarProvider>
     </div>

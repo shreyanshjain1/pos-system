@@ -12,8 +12,8 @@ export default function SettingsPage() {
         <p className="text-sm text-slate-500">Configure store preferences and receipt text.</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="lg:col-span-2 order-2 lg:order-1">
           <SettingsForm />
         </div>
 

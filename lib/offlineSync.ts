@@ -1,104 +1,110 @@
-// Offline sync disabled. Provide a safe no-op export for startAutoSync.
+// Offline sync - automatically retries pending transactions when online
+import { getAllOutboxItems, updateOutboxStatus, updateOutboxAttempts, deleteOutboxItem } from './offlineQueue'
+import { fetchWithAuth } from './fetchWithAuth'
 
-import { getAllOutboxItems, deleteOutboxItem, updateOutboxAttempts, updateOutboxStatus, deletePendingSale } from './offlineQueue'
-import fetchWithAuth from './fetchWithAuth'
+const MAX_RETRIES = 3
 
-let intervalHandle: number | null = null
-let onlineListener: (() => void) | null = null
+let syncInProgress = false
+let syncInterval: number | null = null
 
 export function startAutoSync(opts?: { intervalMs?: number }) {
-  const intervalMs = opts?.intervalMs ?? 30_000
-  // avoid duplicate registration
-  stopAutoSync()
-  async function tryFlush() {
-    try { await flushOnce() } catch (e) { /* swallow */ }
-  }
-  // run periodically
-  intervalHandle = window.setInterval(tryFlush, intervalMs)
-  // also run when coming back online
-  onlineListener = () => { tryFlush().catch(() => {}) }
-  window.addEventListener('online', onlineListener)
+  const intervalMs = opts?.intervalMs || 30000 // 30s default
 
-  // initial attempt
-  tryFlush().catch(() => {})
+  // Don't start multiple sync loops
+  if (syncInterval) return stopAutoSync
 
-  return () => stopAutoSync()
+  syncInterval = window.setInterval(() => {
+    flushOnce().catch(err => console.error('Auto sync error:', err))
+  }, intervalMs)
+
+  // Try immediate sync on startup
+  flushOnce().catch(err => console.error('Initial sync error:', err))
+
+  return stopAutoSync
 }
 
 export function stopAutoSync() {
-  try {
-    if (intervalHandle) { window.clearInterval(intervalHandle); intervalHandle = null }
-    if (onlineListener) { window.removeEventListener('online', onlineListener); onlineListener = null }
-  } catch (_) {}
+  if (syncInterval) {
+    window.clearInterval(syncInterval)
+    syncInterval = null
+  }
 }
 
-export async function flushOnce() {
-  const items = await getAllOutboxItems()
-  if (!items || items.length === 0) return
+export async function flushOnce(): Promise<void> {
+  // Prevent concurrent syncs
+  if (syncInProgress) return
+  syncInProgress = true
 
-  for (const it of items) {
-    try {
-      // basic retry handling
-      const attempts = (it.retryCount || 0) + 1
+  try {
+    const items = await getAllOutboxItems()
+    const pending = items.filter(item => item.status === 'pending')
 
-      // map known action types to endpoints
-      let endpoint = ''
-      const method: 'POST' | 'PUT' | 'DELETE' = 'POST'
-      let body: any = it.payload
+    if (pending.length === 0) return
 
-      switch (it.actionType) {
-        case 'create_product':
-          endpoint = '/api/products'
-          body = (it.payload && it.payload.product) ? it.payload.product : it.payload
-          break
-        case 'assign_barcode':
-          endpoint = '/api/barcodes/assign'
-          // try to include shop_id/device_id on server side via auth + device header
-          body = { ...(it.payload || {}) }
-          break
-        case 'checkout':
-        case 'create_sale':
-          endpoint = '/api/checkout'
-          body = it.payload
-          break
-        default:
-          // unknown action: mark failed
-          await updateOutboxStatus(it.queueId, 'failed', 'unknown_action')
-          continue
-      }
-
-      // issue request with auth helper to attach Authorization header
+    for (const item of pending) {
       try {
-        const res = await fetchWithAuth(endpoint, { method, headers: { 'content-type': 'application/json', 'x-device-id': it.deviceId ?? '' }, body: JSON.stringify(body) })
-        if (res.ok) {
-          // if this outbox item references a local pending sale, remove it
-          try {
-            const localId = it?.payload?._localSaleId
-            if (localId) await deletePendingSale(String(localId))
-          } catch (_) {}
-          await deleteOutboxItem(it.queueId)
+        // Check if max retries exceeded
+        if (item.retryCount >= MAX_RETRIES) {
+          await updateOutboxStatus(item.queueId, 'failed', 'Max retries exceeded')
           continue
         }
 
-        if (res.status === 403) {
-          // unauthorized to sync — mark failed with reason
-          const json = await res.json().catch(() => ({}))
-          await updateOutboxStatus(it.queueId, 'failed', (json && (json.error || json.message)) ? String(json.error || json.message) : 'forbidden')
-          continue
-        }
+        // Attempt to sync based on action type
+        const result = await syncItem(item)
 
-        // server returned other error; increase retry count and leave for retry
-        const txt = await res.text().catch(() => '')
-        await updateOutboxAttempts(it.queueId, attempts)
-        await updateOutboxStatus(it.queueId, 'pending', txt || null)
-      } catch (e: any) {
-        // network error; increment attempts
-        await updateOutboxAttempts(it.queueId, attempts)
+        if (result.success) {
+          await updateOutboxStatus(item.queueId, 'synced', null)
+          await deleteOutboxItem(item.queueId)
+        } else if (result.fatal) {
+          await updateOutboxStatus(item.queueId, 'failed', result.message || 'Server rejected transaction')
+        } else {
+          // Increment retry count
+          await updateOutboxAttempts(item.queueId, item.retryCount + 1)
+          await updateOutboxStatus(item.queueId, 'pending', result.message || null)
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err)
+        await updateOutboxAttempts(item.queueId, item.retryCount + 1)
+        await updateOutboxStatus(item.queueId, 'pending', errMsg)
       }
-    } catch (e) {
-      // ensure single item failures don't abort flush
-      try { await updateOutboxStatus(it.queueId, 'failed', String(e instanceof Error ? e.message : e)) } catch (_) {}
     }
+  } finally {
+    syncInProgress = false
+  }
+}
+
+type SyncResult = { success: boolean; fatal?: boolean; message?: string }
+
+async function syncItem(item: any): Promise<SyncResult> {
+  try {
+    // Route to appropriate endpoint based on action type
+    const response = await fetchWithAuth('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item.payload),
+    })
+
+    if (response.ok) {
+      return { success: true }
+    }
+
+    const json = await response.json().catch(() => ({}))
+    const serverMsg = (json as Record<string, any>)['error'] as string | undefined
+
+    // If unauthorized or forbidden, don't retry
+    if (response.status === 401 || response.status === 403) {
+      return { success: false, fatal: true, message: serverMsg || 'Unauthorized' }
+    }
+
+    // Treat bad request / conflict as fatal (likely stock or validation conflict)
+    if (response.status === 400 || response.status === 409) {
+      return { success: false, fatal: true, message: serverMsg || 'Server rejected transaction (conflict/validation)' }
+    }
+
+    return { success: false, message: serverMsg }
+  } catch (err) {
+    console.error(`Failed to sync ${item.actionType}:`, err)
+    throw err
   }
 }
 

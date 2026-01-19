@@ -10,7 +10,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const id = resolved?.id
     const supabaseAdmin = getSupabaseAdmin()
 
-    const { data, error } = await supabaseAdmin.from('products').select('id, name, price, stock, barcode, shop_id, created_at').eq('id', id).single()
+    const { data, error } = await supabaseAdmin.from('products').select('id, name, price, cost, stock, barcode, min_stock, max_stock, images, sku, shop_id, created_at').eq('id', id).single()
     if (error) throw error
 
     const product: unknown = data
@@ -81,6 +81,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (!mapping || mapping.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // Enforce authenticated user's retail subscription for product updates
+    try {
+      const authHeader2 = req.headers.get('authorization') || ''
+      if (!authHeader2.startsWith('Bearer ')) return NextResponse.json({ error: 'Missing authentication' }, { status: 401 })
+      const userToken = authHeader2.split(' ')[1]
+      const userId = userToken ? ((await (supabaseAdmin.auth as unknown as SupabaseAuthLike).getUser(userToken)).data as SupabaseUserData)?.user?.id : null
+      if (!userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const { getSubscriptionStatus } = await import('@/lib/subscription')
+      const status = await getSubscriptionStatus(supabaseAdmin, userId)
+      if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+      if ((String(status.pos_type || '').toLowerCase()) !== 'retail') return NextResponse.json({ error: 'Not a retail subscription' }, { status: 403 })
+    } catch (e) {
+      console.warn('Products PATCH: subscription check error', e)
+      return NextResponse.json({ error: 'Subscription check error' }, { status: 500 })
+    }
+
     // Enforce that only the authoritative device for the shop may update products
     const deviceIdFromHeader = req.headers.get('x-device-id') || null
     const deviceIdFromBody = (body as Record<string, unknown>)?.deviceId as string | undefined
@@ -98,14 +114,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
     }
 
-    const updatePayload: Record<string, unknown> = { name, price: priceNum, stock: stockNum, barcode }
+    const updatePayload: Record<string, unknown> = { name, price: priceNum, cost: Number((body as any).cost || 0) || 0, stock: stockNum, min_stock: Number((body as any).min_stock || 0) || 0, max_stock: Number((body as any).max_stock || null) || null, sku: (body as any).sku ?? null, images: (body as any).images ?? [], barcode }
     // sanitize any accidental string 'undefined' values to null
     for (const k of Object.keys(updatePayload)) {
       if (updatePayload[k] === 'undefined') updatePayload[k] = null
     }
     console.error('[Products PATCH] updatePayload:', updatePayload)
-    const { data, error } = await supabaseAdmin.from('products').update(updatePayload).eq('id', id).select('id, name, price, stock, barcode, created_at').single()
-    if (error) throw error
+    const { data, error } = await supabaseAdmin.from('products').update(updatePayload).eq('id', id).select('id, name, price, cost, stock, barcode, min_stock, max_stock, images, sku, shop_id, created_at').single()
+    if (error) {
+      const code = (error as any)?.code
+      const msg = String((error as any)?.message || '')
+      if (code === '23505' || /unique/i.test(msg)) {
+        return NextResponse.json({ error: 'Barcode already exists for this shop' }, { status: 400 })
+      }
+      throw error
+    }
     return NextResponse.json({ data })
   } catch (err: unknown) {
     console.error('Product PATCH error', err)
@@ -142,6 +165,21 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       } catch (e) {
         return NextResponse.json({ error: 'authorization_error' }, { status: 403 })
       }
+      // Enforce authenticated user's retail subscription for product deletes
+    try {
+      const authHeader2 = req.headers.get('authorization') || ''
+      if (!authHeader2.startsWith('Bearer ')) return NextResponse.json({ error: 'Missing authentication' }, { status: 401 })
+      const userToken = authHeader2.split(' ')[1]
+      const userId = userToken ? ((await (supabaseAdmin.auth as unknown as { getUser: (t: string) => Promise<{ data?: unknown }> }).getUser(userToken)).data as { user?: { id?: string } })?.user?.id : null
+      if (!userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const { getSubscriptionStatus } = await import('@/lib/subscription')
+      const status = await getSubscriptionStatus(supabaseAdmin, userId)
+      if (!status.active) return NextResponse.json({ error: 'Subscription required or expired' }, { status: 403 })
+      if ((String(status.pos_type || '').toLowerCase()) !== 'retail') return NextResponse.json({ error: 'Not a retail subscription' }, { status: 403 })
+    } catch (e) {
+      console.warn('Products DELETE: subscription check error', e)
+      return NextResponse.json({ error: 'Subscription check error' }, { status: 500 })
+    }
     }
     // Check for existing references in sale_items to avoid FK violation
     const { data: refs, error: refError } = await supabaseAdmin
