@@ -66,19 +66,18 @@ export default function PaymentModal({ isOpen, onClose, amount, title, descripti
                 <p className="text-2xl sm:text-3xl font-bold text-stone-900 text-center">{amount}</p>
               </div>
 
-              {/* QR Code Placeholder */}
-              <div className="bg-white border-2 border-dashed border-stone-300 rounded-xl p-4 sm:p-8 mb-4 sm:mb-6">
-                <div className="aspect-square bg-stone-100 rounded-lg flex items-center justify-center mb-4">
-                  <div className="text-center">
-                    <svg className="w-20 h-20 text-stone-400 mx-auto mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <rect x="3" y="3" width="7" height="7" strokeLinecap="round" strokeLinejoin="round"/>
-                      <rect x="14" y="3" width="7" height="7" strokeLinecap="round" strokeLinejoin="round"/>
-                      <rect x="14" y="14" width="7" height="7" strokeLinecap="round" strokeLinejoin="round"/>
-                      <rect x="3" y="14" width="7" height="7" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    <p className="text-sm text-stone-500">Scan QR Code to Pay</p>
-                  </div>
+              {/* QR Code */}
+              <div className="bg-white border-2 border-stone-300 rounded-xl p-4 sm:p-6 mb-4 sm:mb-6">
+                <div className="aspect-square bg-white rounded-lg flex items-center justify-center mb-3">
+                  <img 
+                    src="/payment-qr.png" 
+                    alt="InstaPay QR Code" 
+                    className="w-full h-full object-contain rounded-lg"
+                  />
                 </div>
+                <p className="text-xs text-stone-600 text-center font-medium mb-1">
+                  Scan with InstaPay
+                </p>
                 <p className="text-xs text-stone-500 text-center">
                   Use your mobile banking app to scan and pay
                 </p>
@@ -98,9 +97,21 @@ export default function PaymentModal({ isOpen, onClose, amount, title, descripti
                   </li>
                   <li className="flex gap-3">
                     <span className="flex-shrink-0 w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-                    <span>Message us on Facebook to confirm your payment</span>
+                    <span>Take a screenshot of your payment confirmation</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">4</span>
+                    <span>Message us on Facebook with the screenshot to confirm your payment</span>
                   </li>
                 </ol>
+                
+                {title.toLowerCase().includes('supply') && (
+                  <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs text-amber-800">
+                      <strong>Note:</strong> This is an initial payment estimate. Final amount may vary as product prices can change. We'll confirm the exact total before delivery.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Facebook Contact Button */}
