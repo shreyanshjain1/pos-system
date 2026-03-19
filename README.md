@@ -48,3 +48,10 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 ## Barcode scanning
 
 - **Scan barcode adds to cart:** On the POS page, enable scanner mode and scan a barcode. If the barcode exists in the backend it is added to the cart.
+
+
+## Attribution
+
+This project is based on the original work from [Raymart-Leyson/pos-system](https://github.com/Raymart-Leyson/pos-system).
+
+This fork extends and improves the project with additional features, fixes, UI/UX improvements, and architecture updates by Shreyansh Jain.
