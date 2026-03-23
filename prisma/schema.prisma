@@ -63,13 +63,13 @@ model User {
 }
 
 model Shop {
-  id             String          @id @default(cuid())
+  id             String              @id @default(cuid())
   name           String
-  slug           String          @unique
-  posType        ShopType        @default(RETAIL)
+  slug           String              @unique
+  posType        ShopType            @default(RETAIL)
   ownerId        String
-  owner          User            @relation("ShopOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  defaultUsers   User[]          @relation("DefaultShop")
+  owner          User                @relation("ShopOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  defaultUsers   User[]              @relation("DefaultShop")
   memberships    UserShop[]
   categories     Category[]
   products       Product[]
@@ -80,18 +80,19 @@ model Shop {
   notifications  Notification[]
   activities     ActivityLog[]
   workerJobs     WorkerJob[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  inventoryMoves InventoryMovement[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@index([ownerId])
 }
 
 model UserShop {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
   shopId    String
-  role      ShopRole  @default(ADMIN)
-  createdAt DateTime  @default(now())
+  role      ShopRole @default(ADMIN)
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -103,7 +104,7 @@ model UserShop {
 
 model Category {
   id        String    @id @default(cuid())
-  shopId     String
+  shopId    String
   name      String
   slug      String
   products  Product[]
@@ -116,25 +117,25 @@ model Category {
 }
 
 model Product {
-  id               String              @id @default(cuid())
-  shopId           String
-  categoryId       String?
-  sku              String?
-  barcode          String?
-  name             String
-  description      String?
-  cost             Decimal             @db.Decimal(12, 2)
-  price            Decimal             @db.Decimal(12, 2)
-  stockQty         Int                 @default(0)
-  reorderPoint     Int                 @default(5)
-  isActive         Boolean             @default(true)
-  category         Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  shop             Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  saleItems        SaleItem[]
-  purchaseItems    PurchaseItem[]
-  inventoryMoves   InventoryMovement[]
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id             String              @id @default(cuid())
+  shopId         String
+  categoryId     String?
+  sku            String?
+  barcode        String?
+  name           String
+  description    String?
+  cost           Decimal             @db.Decimal(12, 2)
+  price          Decimal             @db.Decimal(12, 2)
+  stockQty       Int                 @default(0)
+  reorderPoint   Int                 @default(5)
+  isActive       Boolean             @default(true)
+  category       Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  shop           Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  saleItems      SaleItem[]
+  purchaseItems  PurchaseItem[]
+  inventoryMoves InventoryMovement[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@index([shopId])
   @@index([categoryId])
@@ -143,50 +144,50 @@ model Product {
 }
 
 model Sale {
-  id             String        @id @default(cuid())
+  id             String   @id @default(cuid())
   shopId         String
   saleNumber     String
-  subtotal       Decimal       @db.Decimal(12, 2)
-  taxAmount      Decimal       @db.Decimal(12, 2)
-  discountAmount Decimal       @db.Decimal(12, 2)
-  totalAmount    Decimal       @db.Decimal(12, 2)
+  subtotal       Decimal  @db.Decimal(12, 2)
+  taxAmount      Decimal  @db.Decimal(12, 2)
+  discountAmount Decimal  @db.Decimal(12, 2)
+  totalAmount    Decimal  @db.Decimal(12, 2)
   paymentMethod  String
   notes          String?
   cashierName    String?
-  shop           Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
   items          SaleItem[]
-  createdAt      DateTime      @default(now())
+  createdAt      DateTime @default(now())
 
   @@unique([shopId, saleNumber])
   @@index([shopId, createdAt])
 }
 
 model SaleItem {
-  id          String    @id @default(cuid())
-  saleId       String
-  productId    String
+  id          String  @id @default(cuid())
+  saleId      String
+  productId   String
   productName String
   qty         Int
-  unitPrice   Decimal   @db.Decimal(12, 2)
-  lineTotal   Decimal   @db.Decimal(12, 2)
-  sale        Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product     Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  unitPrice   Decimal @db.Decimal(12, 2)
+  lineTotal   Decimal @db.Decimal(12, 2)
+  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([saleId])
   @@index([productId])
 }
 
 model InventoryMovement {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   shopId      String
   productId   String
   type        String
   qtyChange   Int
   referenceId String?
   notes       String?
-  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
 
   @@index([shopId, createdAt])
   @@index([productId, createdAt])
@@ -211,53 +212,53 @@ model Supplier {
 }
 
 model PurchaseOrder {
-  id             String          @id @default(cuid())
+  id             String         @id @default(cuid())
   shopId         String
   supplierId     String
   purchaseNumber String
-  status         PurchaseStatus  @default(RECEIVED)
-  totalAmount    Decimal         @db.Decimal(12, 2)
+  status         PurchaseStatus @default(RECEIVED)
+  totalAmount    Decimal        @db.Decimal(12, 2)
   notes          String?
-  supplier       Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplier       Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  shop           Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
   items          PurchaseItem[]
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime       @default(now())
 
   @@unique([shopId, purchaseNumber])
   @@index([shopId, createdAt])
 }
 
 model PurchaseItem {
-  id           String         @id @default(cuid())
-  purchaseId   String
-  productId    String
-  productName  String
-  qty          Int
-  unitCost     Decimal        @db.Decimal(12, 2)
-  lineTotal    Decimal        @db.Decimal(12, 2)
-  purchase     PurchaseOrder  @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  product      Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id          String        @id @default(cuid())
+  purchaseId  String
+  productId   String
+  productName String
+  qty         Int
+  unitCost    Decimal       @db.Decimal(12, 2)
+  lineTotal   Decimal       @db.Decimal(12, 2)
+  purchase    PurchaseOrder @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product     Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([purchaseId])
   @@index([productId])
 }
 
 model Notification {
-  id         String           @id @default(cuid())
-  shopId     String
-  type       NotificationType
-  title      String
-  message    String
-  isRead     Boolean          @default(false)
-  shop       Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  createdAt  DateTime         @default(now())
+  id        String           @id @default(cuid())
+  shopId    String
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  shop      Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt DateTime         @default(now())
 
   @@index([shopId, createdAt])
   @@index([shopId, isRead])
 }
 
 model ActivityLog {
-  id         String    @id @default(cuid())
+  id          String   @id @default(cuid())
   shopId      String
   userId      String?
   action      String
@@ -265,40 +266,40 @@ model ActivityLog {
   entityId    String?
   description String
   metadata    Json?
-  shop        Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
+  shop        Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
 
   @@index([shopId, createdAt])
 }
 
 model ShopSetting {
-  id              String    @id @default(cuid())
-  shopId          String    @unique
-  currencySymbol  String    @default("₱")
-  taxRate         Decimal   @default(0) @db.Decimal(5, 2)
-  receiptFooter   String?
-  lowStockEnabled Boolean   @default(true)
-  lowStockThreshold Int     @default(5)
-  shop            Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  updatedAt       DateTime  @updatedAt
-  createdAt       DateTime  @default(now())
+  id                String   @id @default(cuid())
+  shopId            String   @unique
+  currencySymbol    String   @default("₱")
+  taxRate           Decimal  @default(0) @db.Decimal(5, 2)
+  receiptFooter     String?
+  lowStockEnabled   Boolean  @default(true)
+  lowStockThreshold Int      @default(5)
+  shop              Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
 }
 
 model WorkerJob {
-  id          String            @id @default(cuid())
-  shopId       String?
+  id          String          @id @default(cuid())
+  shopId      String?
   type        WorkerJobType
-  status      WorkerJobStatus   @default(QUEUED)
+  status      WorkerJobStatus @default(QUEUED)
   payload     Json?
   error       String?
-  runAt       DateTime          @default(now())
+  runAt       DateTime        @default(now())
   startedAt   DateTime?
   finishedAt  DateTime?
   createdById String?
-  createdBy   User?             @relation("WorkerJobCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  shop        Shop?             @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  createdAt   DateTime          @default(now())
+  createdBy   User?           @relation("WorkerJobCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  shop        Shop?           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  createdAt   DateTime        @default(now())
 
   @@index([status, runAt])
   @@index([shopId, status])
