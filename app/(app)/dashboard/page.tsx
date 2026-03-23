@@ -1,55 +1,94 @@
-import AppHeader from '@/components/layout/AppHeader';
-import StatsGrid from '@/components/dashboard/StatsGrid';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { money, dateTime } from '@/lib/format';
-import Button from '@/components/ui/Button';
-import Link from 'next/link';
+import AppHeader from '@/components/layout/AppHeader';
+import DashboardStats from '@/components/dashboard/DashboardStats';
+import RecentSalesCard from '@/components/dashboard/RecentSalesCard';
+import LowStockCard from '@/components/dashboard/LowStockCard';
 
 export default async function DashboardPage() {
   const session = await auth();
-  const shopId = session?.user?.defaultShopId as string;
 
-  const [shop, productsCount, lowStockCount, salesToday, notifications, recentSales, activities, settings] =
+  if (!session?.user?.id) {
+    redirect('/login');
+  }
+
+  let shopId = session.user.defaultShopId;
+
+  if (!shopId) {
+    const membership = await prisma.userShop.findFirst({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: 'asc' },
+      select: { shopId: true }
+    });
+
+    if (!membership?.shopId) {
+      redirect('/onboard');
+    }
+
+    shopId = membership.shopId;
+
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { defaultShopId: shopId }
+    });
+  }
+
+  const [shop, totalProducts, lowStockProducts, totalSuppliers, recentSales, settings] =
     await Promise.all([
-      prisma.shop.findUnique({ where: { id: shopId } }),
-      prisma.product.count({ where: { shopId, isActive: true } }),
+      prisma.shop.findUnique({
+        where: { id: shopId }
+      }),
       prisma.product.count({
+        where: { shopId, isActive: true }
+      }),
+      prisma.product.findMany({
         where: {
           shopId,
           isActive: true,
-          OR: [{ stockQty: { lte: 0 } }, { stockQty: { lte: 5 } }]
-        }
-      }),
-      prisma.sale.aggregate({
-        where: {
-          shopId,
-          createdAt: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0))
+          stockQty: {
+            lte: prisma.shopSetting.fields.lowStockThreshold
           }
         },
-        _sum: { totalAmount: true },
-        _count: true
+        orderBy: [{ stockQty: 'asc' }, { name: 'asc' }],
+        take: 8
+      }).catch(async () => {
+        const fallbackSettings = await prisma.shopSetting.findUnique({
+          where: { shopId },
+          select: { lowStockThreshold: true }
+        });
+
+        return prisma.product.findMany({
+          where: {
+            shopId,
+            isActive: true,
+            stockQty: {
+              lte: fallbackSettings?.lowStockThreshold ?? 5
+            }
+          },
+          orderBy: [{ stockQty: 'asc' }, { name: 'asc' }],
+          take: 8
+        });
       }),
-      prisma.notification.findMany({
-        where: { shopId },
-        orderBy: { createdAt: 'desc' },
-        take: 6
+      prisma.supplier.count({
+        where: { shopId, isActive: true }
       }),
       prisma.sale.findMany({
         where: { shopId },
         orderBy: { createdAt: 'desc' },
-        take: 5
+        take: 8,
+        include: {
+          items: true
+        }
       }),
-      prisma.activityLog.findMany({
-        where: { shopId },
-        orderBy: { createdAt: 'desc' },
-        take: 6
-      }),
-      prisma.shopSetting.findUnique({ where: { shopId } })
+      prisma.shopSetting.findUnique({
+        where: { shopId }
+      })
     ]);
+
+  if (!shop) {
+    redirect('/onboard');
+  }
 
   const currencySymbol = settings?.currencySymbol ?? '₱';
 
@@ -57,77 +96,43 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <AppHeader
         title="Dashboard"
-        subtitle={`Welcome back${shop ? ` to ${shop.name}` : ''}. Monitor revenue, stock pressure, and recent activity.`}
-        action={
-          <div className="flex gap-3">
-            <Link href="/checkout"><Button>New Sale</Button></Link>
-            <form action="/api/worker/run-now" method="post">
-              <Button variant="secondary" type="submit">Run Worker Scan</Button>
-            </form>
-          </div>
-        }
+        subtitle={`Welcome back. Here is what is happening in ${shop.name}.`}
       />
 
-      <StatsGrid
-        cards={[
-          { label: 'Products', value: String(productsCount), helper: 'Active sellable items' },
-          { label: 'Low Stock', value: String(lowStockCount), helper: 'Needs replenishment' },
-          { label: 'Sales Today', value: String(salesToday._count), helper: 'Completed transactions' },
-          { label: 'Revenue Today', value: money(Number(salesToday._sum.totalAmount ?? 0), currencySymbol), helper: 'Gross receipts' }
-        ]}
+      <DashboardStats
+        totalProducts={totalProducts}
+        lowStockCount={lowStockProducts.length}
+        totalSuppliers={totalSuppliers}
+        totalSales={recentSales.length}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card>
-          <div className="mb-4 flex items-center justify-between">
-            <div className="text-lg font-black text-stone-900">Recent sales</div>
-            <Link href="/sales" className="text-sm font-semibold text-emerald-600">View all</Link>
-          </div>
-          <div className="space-y-3">
-            {recentSales.length ? recentSales.map((sale) => (
-              <div key={sale.id} className="flex items-center justify-between rounded-2xl border border-stone-200 px-4 py-3">
-                <div>
-                  <div className="font-semibold text-stone-900">{sale.saleNumber}</div>
-                  <div className="text-sm text-stone-600">{dateTime(sale.createdAt)}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-black text-stone-900">{money(Number(sale.totalAmount), currencySymbol)}</div>
-                  <div className="text-sm text-stone-500">{sale.paymentMethod}</div>
-                </div>
-              </div>
-            )) : <div className="text-sm text-stone-500">No sales yet.</div>}
-          </div>
-        </Card>
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <RecentSalesCard
+          sales={recentSales.map((sale) => ({
+            ...sale,
+            subtotal: sale.subtotal.toString(),
+            taxAmount: sale.taxAmount.toString(),
+            discountAmount: sale.discountAmount.toString(),
+            totalAmount: sale.totalAmount.toString(),
+            createdAt: sale.createdAt.toISOString(),
+            items: sale.items.map((item) => ({
+              ...item,
+              unitPrice: item.unitPrice.toString(),
+              lineTotal: item.lineTotal.toString()
+            }))
+          }))}
+          currencySymbol={currencySymbol}
+        />
 
-        <Card>
-          <div className="mb-4 text-lg font-black text-stone-900">Notifications</div>
-          <div className="space-y-3">
-            {notifications.length ? notifications.map((note) => (
-              <div key={note.id} className="rounded-2xl border border-stone-200 px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-semibold text-stone-900">{note.title}</div>
-                  <Badge>{note.type.replaceAll('_', ' ')}</Badge>
-                </div>
-                <div className="mt-1 text-sm text-stone-600">{note.message}</div>
-                <div className="mt-2 text-xs text-stone-500">{dateTime(note.createdAt)}</div>
-              </div>
-            )) : <div className="text-sm text-stone-500">No notifications yet.</div>}
-          </div>
-        </Card>
+        <LowStockCard
+          products={lowStockProducts.map((product) => ({
+            ...product,
+            cost: product.cost.toString(),
+            price: product.price.toString()
+          }))}
+          currencySymbol={currencySymbol}
+        />
       </div>
-
-      <Card>
-        <div className="mb-4 text-lg font-black text-stone-900">Recent activity</div>
-        <div className="grid gap-3">
-          {activities.length ? activities.map((activity) => (
-            <div key={activity.id} className="rounded-2xl border border-stone-200 px-4 py-3">
-              <div className="font-semibold text-stone-900">{activity.action}</div>
-              <div className="mt-1 text-sm text-stone-600">{activity.description}</div>
-              <div className="mt-2 text-xs text-stone-500">{dateTime(activity.createdAt)}</div>
-            </div>
-          )) : <div className="text-sm text-stone-500">No activity recorded yet.</div>}
-        </div>
-      </Card>
     </div>
   );
 }

@@ -144,19 +144,19 @@ model Product {
 }
 
 model Sale {
-  id             String   @id @default(cuid())
+  id             String     @id @default(cuid())
   shopId         String
   saleNumber     String
-  subtotal       Decimal  @db.Decimal(12, 2)
-  taxAmount      Decimal  @db.Decimal(12, 2)
-  discountAmount Decimal  @db.Decimal(12, 2)
-  totalAmount    Decimal  @db.Decimal(12, 2)
+  subtotal       Decimal    @db.Decimal(12, 2)
+  taxAmount      Decimal    @db.Decimal(12, 2)
+  discountAmount Decimal    @db.Decimal(12, 2)
+  totalAmount    Decimal    @db.Decimal(12, 2)
   paymentMethod  String
   notes          String?
   cashierName    String?
-  shop           Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop           Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
   items          SaleItem[]
-  createdAt      DateTime @default(now())
+  createdAt      DateTime   @default(now())
 
   @@unique([shopId, saleNumber])
   @@index([shopId, createdAt])
